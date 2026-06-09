@@ -2,13 +2,15 @@
 
 import Link from "next/link";
 import type { Journey } from "@/lib/types";
+import type { FootprintSettings } from "@/lib/settings";
 import { deriveTitle, formatDateRange } from "@/lib/utils";
 
 interface JourneyCardProps {
   journey: Journey;
+  settings: FootprintSettings;
 }
 
-export default function JourneyCard({ journey }: JourneyCardProps) {
+export default function JourneyCard({ journey, settings }: JourneyCardProps) {
   const coverPhoto = journey.photos.find(
     (p) => p.id === journey.coverPhotoId
   );
@@ -18,6 +20,12 @@ export default function JourneyCard({ journey }: JourneyCardProps) {
     journey.startDate
   );
   const dateRange = formatDateRange(journey.startDate, journey.endDate);
+
+  const showLocation = settings.homepageCard.showLocation;
+  const showTime = settings.homepageCard.showTime;
+  const showCompanions = settings.homepageCard.showCompanions;
+
+  const hasAnyMeta = showLocation || showTime || (showCompanions && journey.companions.length > 0);
 
   return (
     <Link href={`/journeys/${journey.id}`} className="group block">
@@ -37,19 +45,23 @@ export default function JourneyCard({ journey }: JourneyCardProps) {
           )}
         </div>
         {/* Card info */}
-        <div className="px-4 py-3">
-          <p className="text-[15px] font-semibold text-foreground leading-snug">
-            {journey.location}
-          </p>
-          {dateRange && (
-            <p className="mt-0.5 text-[14px] text-muted">{dateRange}</p>
-          )}
-          {journey.companions.length > 0 && (
-            <p className="mt-1 text-[14px] text-muted">
-              {journey.companions.join(", ")}
-            </p>
-          )}
-        </div>
+        {hasAnyMeta && (
+          <div className="px-4 py-3">
+            {showLocation && (
+              <p className="text-[15px] font-semibold text-foreground leading-snug">
+                {journey.location}
+              </p>
+            )}
+            {showTime && dateRange && (
+              <p className="mt-0.5 text-[14px] text-muted">{dateRange}</p>
+            )}
+            {showCompanions && journey.companions.length > 0 && (
+              <p className="mt-1 text-[14px] text-muted">
+                {journey.companions.join(", ")}
+              </p>
+            )}
+          </div>
+        )}
       </div>
     </Link>
   );

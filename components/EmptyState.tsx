@@ -14,7 +14,7 @@ export default function EmptyState() {
         href="/journeys/new"
         className="rounded-button bg-accent px-6 py-3 text-sm font-medium text-white transition hover:bg-accent/85"
       >
-        New Journey
+        + New Journey
       </Link>
     </div>
   );

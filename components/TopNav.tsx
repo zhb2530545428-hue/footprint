@@ -12,12 +12,26 @@ export default function TopNav() {
         >
           Footprint
         </Link>
-        <Link
-          href="/journeys/new"
-          className="rounded-button bg-foreground px-5 py-2 text-sm font-medium text-white transition hover:bg-foreground/85"
-        >
-          + New Journey
-        </Link>
+        <div className="flex items-center gap-4">
+          <Link
+            href="/trash"
+            className="text-sm text-muted transition hover:text-foreground"
+          >
+            Trash
+          </Link>
+          <Link
+            href="/settings"
+            className="text-sm text-muted transition hover:text-foreground"
+          >
+            Settings
+          </Link>
+          <Link
+            href="/journeys/new"
+            className="rounded-button bg-foreground px-5 py-2 text-sm font-medium text-white transition hover:bg-foreground/85"
+          >
+            + New Journey
+          </Link>
+        </div>
       </div>
     </nav>
   );

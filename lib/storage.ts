@@ -158,6 +158,43 @@ export async function deleteJourney(id: string): Promise<void> {
   );
 }
 
+/** Move a journey to trash (soft delete) */
+export async function moveJourneyToTrash(id: string): Promise<void> {
+  if (!isBrowser()) return;
+  const journeys = readStoredJourneys();
+  const idx = journeys.findIndex((j) => j.id === id);
+  if (idx === -1) return;
+  journeys[idx] = { ...journeys[idx], status: "trashed", updatedAt: new Date().toISOString() };
+  writeStoredJourneys(journeys);
+}
+
+/** Restore a trashed journey back to archived */
+export async function restoreJourney(id: string): Promise<void> {
+  if (!isBrowser()) return;
+  const journeys = readStoredJourneys();
+  const idx = journeys.findIndex((j) => j.id === id);
+  if (idx === -1) return;
+  journeys[idx] = { ...journeys[idx], status: "archived", updatedAt: new Date().toISOString() };
+  writeStoredJourneys(journeys);
+}
+
+/** Permanently delete a journey: remove metadata + IndexedDB photo blobs */
+export async function permanentlyDeleteJourney(id: string): Promise<void> {
+  if (!isBrowser()) return;
+  const journeys = readStoredJourneys();
+  const target = journeys.find((j) => j.id === id);
+  writeStoredJourneys(journeys.filter((j) => j.id !== id));
+  await deletePhotoBlobs(
+    target?.photos.flatMap((p) => (p.storageKey ? [p.storageKey] : [])) ?? []
+  );
+}
+
+/** Get all trashed journeys */
+export async function getTrashedJourneys(): Promise<Journey[]> {
+  const all = await getJourneys();
+  return all.filter((j) => j.status === "trashed");
+}
+
 /** Replace all journeys (useful for seeding) */
 export async function setJourneys(journeys: Journey[]): Promise<void> {
   if (!isBrowser()) return;

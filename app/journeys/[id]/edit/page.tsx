@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import type { Journey, JourneyPhoto } from "@/lib/types";
 import {
   getJourney,
+  moveJourneyToTrash,
   revokePhotoObjectUrls,
   updateJourney,
 } from "@/lib/storage";
@@ -15,6 +16,7 @@ import JourneyForm from "@/components/JourneyForm";
 import type { JourneyFormData } from "@/components/JourneyForm";
 import UploadDropzone from "@/components/UploadDropzone";
 import PhotoGrid from "@/components/PhotoGrid";
+import ConfirmModal from "@/components/ConfirmModal";
 
 export default function EditJourneyPage() {
   const params = useParams();
@@ -37,6 +39,8 @@ export default function EditJourneyPage() {
   const photosRef = useRef<JourneyPhoto[]>([]);
   const originalStorageKeysRef = useRef(new Set<string>());
   const savedRef = useRef(false);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     photosRef.current = photos;
@@ -235,6 +239,20 @@ export default function EditJourneyPage() {
     }
   }, [canSave, journey, photos, formData, router]);
 
+  const handleDelete = useCallback(async () => {
+    if (!journey) return;
+    setDeleting(true);
+    try {
+      await moveJourneyToTrash(journey.id);
+      savedRef.current = true;
+      router.push("/");
+    } catch {
+      setDeleting(false);
+      setDeleteModalOpen(false);
+      setStorageError("This journey could not be moved to Trash. Please try again.");
+    }
+  }, [journey, router]);
+
   const displayTitle = deriveTitle(
     formData.title,
     formData.location,
@@ -348,6 +366,35 @@ export default function EditJourneyPage() {
             </div>
           </div>
         </div>
+
+        {/* Delete Journey */}
+        <div className="mt-12 border-t border-border pt-8">
+          <h2 className="mb-3 text-[15px] font-semibold text-muted uppercase tracking-wide">
+            Danger Zone
+          </h2>
+          <p className="mb-4 text-[14px] text-muted leading-relaxed max-w-lg">
+            Move this journey to Trash. It will be hidden from your homepage
+            but can be restored from the Trash page. Photos will not be
+            permanently deleted until you confirm deletion from Trash.
+          </p>
+          <button
+            onClick={() => setDeleteModalOpen(true)}
+            className="rounded-button border border-red-200 bg-white px-5 py-2.5 text-sm font-medium text-red-600 transition hover:bg-red-50"
+          >
+            Delete Journey
+          </button>
+        </div>
+
+        {/* Delete Confirmation Modal */}
+        <ConfirmModal
+          open={deleteModalOpen}
+          title="Move to Trash"
+          message="This journey will be moved to Trash and will no longer appear on your homepage. Photos will not be permanently deleted yet — you can restore this journey from the Trash page at any time."
+          confirmLabel={deleting ? "Moving…" : "Move to Trash"}
+          confirmVariant="danger"
+          onConfirm={handleDelete}
+          onCancel={() => setDeleteModalOpen(false)}
+        />
       </main>
     </div>
   );

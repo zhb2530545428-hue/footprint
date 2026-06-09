@@ -1,4 +1,4 @@
-export type JourneyStatus = "planned" | "draft" | "curation" | "archived";
+export type JourneyStatus = "planned" | "draft" | "curation" | "archived" | "trashed";
 
 export type PhotoCategory =
   | "all"
