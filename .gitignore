@@ -1,0 +1,40 @@
+# Next.js
+.next/
+
+# Dependencies
+node_modules/
+vendor/
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Build output
+dist/
+build/
+*.egg-info/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code (个人配置不提交)
+.claude/settings.local.json
+.claude/worktrees/
+
+# Logs
+*.log
+logs/
