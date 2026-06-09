@@ -1,5 +1,6 @@
 # Next.js
 .next/
+.next-build/
 
 # Dependencies
 node_modules/
@@ -31,6 +32,9 @@ build/
 # OS
 .DS_Store
 Thumbs.db
+
+# Dev helper scripts
+start-dev.sh
 
 # Claude Code (个人配置不提交)
 .claude/settings.local.json

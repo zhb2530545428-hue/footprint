@@ -17,20 +17,33 @@ export default function PhotoTile({
 }: PhotoTileProps) {
   return (
     <div className="group relative overflow-hidden rounded-card bg-surface">
-      <img
-        src={photo.url}
-        alt={photo.fileName ?? "Photo"}
-        className="aspect-[4/3] w-full object-cover"
-      />
+      {/* Use padding-bottom trick for reliable aspect ratio */}
+      <div className="relative w-full" style={{ paddingBottom: "75%" }}>
+        <img
+          src={photo.url}
+          alt={photo.fileName ?? "Photo"}
+          className="absolute inset-0 h-full w-full object-cover"
+          onError={(e) => {
+            (e.target as HTMLImageElement).style.display = "none";
+          }}
+        />
+      </div>
 
       {/* Orange note dot */}
       {photo.hasNote && (
-        <div className="absolute right-2 top-2 h-2 w-2 rounded-full bg-accent" />
+        <div className="absolute right-2 top-2 z-10 h-2 w-2 rounded-full bg-accent" />
       )}
 
-      {/* Controls stay visible on touch devices and reveal on hover/focus elsewhere. */}
-      <div className="absolute inset-0 flex items-end justify-center bg-black/20 transition [@media(hover:hover)]:bg-black/0 [@media(hover:hover)]:group-hover:bg-black/20 group-focus-within:bg-black/20">
-        <div className="flex w-full gap-1 px-2 pb-2 transition [@media(hover:hover)]:translate-y-full [@media(hover:hover)]:group-hover:translate-y-0 group-focus-within:translate-y-0">
+      {/* Cover badge */}
+      {photo.isCover && (
+        <span className="absolute left-2 top-2 z-10 rounded-md bg-accent px-2 py-0.5 text-[11px] font-medium text-white">
+          Cover
+        </span>
+      )}
+
+      {/* Controls overlay */}
+      <div className="absolute inset-0 flex items-end justify-center bg-black/0 transition group-hover:bg-black/20">
+        <div className="flex w-full gap-1 px-2 pb-2 opacity-0 transition group-hover:opacity-100">
           <button
             type="button"
             onClick={(e) => {

@@ -9,20 +9,37 @@ interface UploadDropzoneProps {
 export default function UploadDropzone({ onFilesSelected }: UploadDropzoneProps) {
   const [isDragging, setIsDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dragCounterRef = useRef(0);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-    setIsDragging(true);
+    e.stopPropagation();
+  }, []);
+
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current += 1;
+    if (e.dataTransfer.items?.length > 0) {
+      setIsDragging(true);
+    }
   }, []);
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-    setIsDragging(false);
+    e.stopPropagation();
+    dragCounterRef.current -= 1;
+    if (dragCounterRef.current <= 0) {
+      dragCounterRef.current = 0;
+      setIsDragging(false);
+    }
   }, []);
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
+      e.stopPropagation();
+      dragCounterRef.current = 0;
       setIsDragging(false);
       const files = Array.from(e.dataTransfer.files).filter((f) =>
         f.type.startsWith("image/")
@@ -42,22 +59,32 @@ export default function UploadDropzone({ onFilesSelected }: UploadDropzoneProps)
     [onFilesSelected]
   );
 
+  const handleClick = useCallback(() => {
+    inputRef.current?.click();
+  }, []);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        inputRef.current?.click();
+      }
+    },
+    []
+  );
+
   return (
     <div
       onDragOver={handleDragOver}
+      onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      onClick={() => inputRef.current?.click()}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          inputRef.current?.click();
-        }
-      }}
+      onClick={handleClick}
+      onKeyDown={handleKeyDown}
       role="button"
       tabIndex={0}
       aria-label="Upload photos"
-      className={`cursor-pointer rounded-card border-2 border-dashed p-12 text-center transition ${
+      className={`cursor-pointer rounded-card border-2 border-dashed p-12 text-center transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 ${
         isDragging
           ? "border-accent bg-accent-soft"
           : "border-border hover:border-muted"
@@ -69,7 +96,8 @@ export default function UploadDropzone({ onFilesSelected }: UploadDropzoneProps)
         accept="image/*"
         multiple
         onChange={handleChange}
-        className="hidden"
+        className="sr-only"
+        aria-hidden="true"
       />
       <div className="text-3xl mb-3">📸</div>
       <p className="text-[15px] font-medium text-foreground">
