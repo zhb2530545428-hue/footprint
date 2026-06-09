@@ -11,6 +11,7 @@ export type PhotoCategory =
 export interface JourneyPhoto {
   id: string;
   url: string;
+  storageKey?: string;
   fileName?: string;
   isCover: boolean;
   isHighlight: boolean;

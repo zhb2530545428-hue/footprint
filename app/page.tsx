@@ -2,7 +2,11 @@
 
 import { useEffect, useState } from "react";
 import type { Journey } from "@/lib/types";
-import { getJourneys, setJourneys } from "@/lib/storage";
+import {
+  getJourneys,
+  revokeJourneyObjectUrls,
+  setJourneys,
+} from "@/lib/storage";
 import { MOCK_JOURNEYS } from "@/lib/mock-data";
 import TopNav from "@/components/TopNav";
 import JourneyGrid from "@/components/JourneyGrid";
@@ -13,16 +17,36 @@ export default function HomePage() {
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    let journeys = getJourneys();
+    let cancelled = false;
+    let loadedJourneys: Journey[] = [];
 
-    // Seed mock data on first visit
-    if (journeys.length === 0) {
-      journeys = MOCK_JOURNEYS;
-      setJourneys(journeys);
-    }
+    const loadJourneys = async () => {
+      let journeys = await getJourneys();
 
-    setArchived(journeys.filter((j) => j.status === "archived"));
-    setLoaded(true);
+      // Seed mock data on first visit
+      if (journeys.length === 0) {
+        journeys = MOCK_JOURNEYS;
+        await setJourneys(journeys);
+      }
+
+      loadedJourneys = journeys;
+      if (cancelled) {
+        revokeJourneyObjectUrls(journeys);
+        return;
+      }
+
+      setArchived(journeys.filter((j) => j.status === "archived"));
+      setLoaded(true);
+    };
+
+    void loadJourneys().catch(() => {
+      if (!cancelled) setLoaded(true);
+    });
+
+    return () => {
+      cancelled = true;
+      revokeJourneyObjectUrls(loadedJourneys);
+    };
   }, []);
 
   if (!loaded) {

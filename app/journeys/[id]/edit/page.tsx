@@ -1,9 +1,13 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { useParams, useRouter } from "next/navigation";
 import type { Journey, JourneyPhoto } from "@/lib/types";
-import { revokePhotoObjectUrls, saveJourney } from "@/lib/storage";
+import {
+  getJourney,
+  revokePhotoObjectUrls,
+  updateJourney,
+} from "@/lib/storage";
 import { deletePhotoBlobs, savePhotoBlob } from "@/lib/image-storage";
 import { generateId, deriveTitle } from "@/lib/utils";
 import TopNav from "@/components/TopNav";
@@ -12,8 +16,13 @@ import type { JourneyFormData } from "@/components/JourneyForm";
 import UploadDropzone from "@/components/UploadDropzone";
 import PhotoGrid from "@/components/PhotoGrid";
 
-export default function NewJourneyPage() {
+export default function EditJourneyPage() {
+  const params = useParams();
   const router = useRouter();
+  const id = params.id as string;
+
+  const [journey, setJourney] = useState<Journey | null>(null);
+  const [loaded, setLoaded] = useState(false);
   const [formData, setFormData] = useState<JourneyFormData>({
     title: "",
     location: "",
@@ -23,26 +32,68 @@ export default function NewJourneyPage() {
     notes: "",
   });
   const [photos, setPhotos] = useState<JourneyPhoto[]>([]);
-  const [archiving, setArchiving] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [storageError, setStorageError] = useState("");
   const photosRef = useRef<JourneyPhoto[]>([]);
-  const archivedRef = useRef(false);
+  const originalStorageKeysRef = useRef(new Set<string>());
+  const savedRef = useRef(false);
 
   useEffect(() => {
     photosRef.current = photos;
   }, [photos]);
 
   useEffect(() => {
+    let cancelled = false;
+
+    void getJourney(id)
+      .then((found) => {
+        if (cancelled) {
+          if (found) revokePhotoObjectUrls(found.photos);
+          return;
+        }
+        if (!found) {
+          setLoaded(true);
+          return;
+        }
+
+        originalStorageKeysRef.current = new Set(
+          found.photos.flatMap((photo) => (photo.storageKey ? [photo.storageKey] : []))
+        );
+        photosRef.current = found.photos;
+        setJourney(found);
+        setFormData({
+          title: found.title ?? "",
+          location: found.location,
+          startDate: found.startDate ?? "",
+          endDate: found.endDate ?? "",
+          companions: found.companions.join(", "),
+          notes: found.notes ?? "",
+        });
+        setPhotos(found.photos);
+        setLoaded(true);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setStorageError("This journey could not be loaded from browser storage.");
+          setLoaded(true);
+        }
+      });
+
     return () => {
+      cancelled = true;
       const currentPhotos = photosRef.current;
       revokePhotoObjectUrls(currentPhotos);
-      if (!archivedRef.current) {
+      if (!savedRef.current) {
         void deletePhotoBlobs(
-          currentPhotos.flatMap((photo) => (photo.storageKey ? [photo.storageKey] : []))
+          currentPhotos.flatMap((photo) =>
+            photo.storageKey && !originalStorageKeysRef.current.has(photo.storageKey)
+              ? [photo.storageKey]
+              : []
+          )
         );
       }
     };
-  }, []);
+  }, [id]);
 
   const handleFilesSelected = useCallback(async (files: File[]) => {
     setStorageError("");
@@ -81,52 +132,64 @@ export default function NewJourneyPage() {
     }
   }, []);
 
-  const handleSetCover = useCallback((id: string) => {
+  const handleSetCover = useCallback((photoId: string) => {
     setPhotos((prev) =>
       prev.map((p) => ({
         ...p,
-        isCover: p.id === id,
+        isCover: p.id === photoId,
       }))
     );
   }, []);
 
-  const handleToggleHighlight = useCallback((id: string) => {
+  const handleToggleHighlight = useCallback((photoId: string) => {
     setPhotos((prev) =>
       prev.map((p) =>
-        p.id === id ? { ...p, isHighlight: !p.isHighlight } : p
+        p.id === photoId ? { ...p, isHighlight: !p.isHighlight } : p
       )
     );
   }, []);
 
-  const handleSetNote = useCallback((id: string, note: string) => {
+  const handleSetNote = useCallback((photoId: string, note: string) => {
     setPhotos((prev) =>
       prev.map((p) =>
-        p.id === id ? { ...p, note: note || undefined, hasNote: note.length > 0 } : p
+        p.id === photoId ? { ...p, note: note || undefined, hasNote: note.length > 0 } : p
       )
     );
   }, []);
 
-  const handleRemove = useCallback((id: string) => {
-    const removed = photosRef.current.find((photo) => photo.id === id);
+  const handleRemove = useCallback((photoId: string) => {
+    const removed = photosRef.current.find((photo) => photo.id === photoId);
     if (removed) revokePhotoObjectUrls([removed]);
-    if (removed?.storageKey) {
+    if (
+      removed?.storageKey &&
+      !originalStorageKeysRef.current.has(removed.storageKey)
+    ) {
       void deletePhotoBlobs([removed.storageKey]).catch(() => {
         setStorageError("The photo was removed, but its browser storage could not be cleaned up.");
       });
     }
+
     setPhotos((prev) => {
-      const next = prev.filter((p) => p.id !== id);
-      photosRef.current = next;
-      return next;
+      // Reassign cover if the removed photo was the cover
+      const nextPhotos = prev.filter((p) => p.id !== photoId);
+      const wasCover = removed?.isCover;
+      if (wasCover && nextPhotos.length > 0) {
+        // Attempt to keep an existing cover; otherwise auto-pick first
+        const existingCover = nextPhotos.find((p) => p.isCover);
+        if (!existingCover) {
+          nextPhotos[0] = { ...nextPhotos[0], isCover: true };
+        }
+      }
+      photosRef.current = nextPhotos;
+      return nextPhotos;
     });
   }, []);
 
-  const canArchive =
-    formData.location.trim().length > 0 && !archiving;
+  const canSave = formData.location.trim().length > 0 && !saving;
 
-  const handleArchive = useCallback(async () => {
-    if (!canArchive) return;
-    setArchiving(true);
+  const handleSave = useCallback(async () => {
+    if (!canSave || !journey) return;
+    setSaving(true);
     setStorageError("");
 
     // Ensure exactly one cover photo
@@ -142,7 +205,6 @@ export default function NewJourneyPage() {
       }));
     }
 
-    const now = new Date().toISOString();
     const coverPhotoId = finalPhotos.find((p) => p.isCover)?.id;
     const companions = formData.companions
       .split(",")
@@ -151,30 +213,27 @@ export default function NewJourneyPage() {
 
     const title = formData.title.trim() || undefined;
 
-    const journey: Journey = {
-      id: generateId(),
+    const updated: Journey = {
+      ...journey,
       title,
       location: formData.location.trim(),
       startDate: formData.startDate || undefined,
       endDate: formData.endDate || undefined,
       companions,
       notes: formData.notes.trim() || undefined,
-      status: "archived",
       coverPhotoId,
       photos: finalPhotos,
-      createdAt: now,
-      updatedAt: now,
     };
 
     try {
-      await saveJourney(journey);
-      archivedRef.current = true;
+      await updateJourney(updated);
+      savedRef.current = true;
       router.push(`/journeys/${journey.id}`);
     } catch {
-      setArchiving(false);
-      setStorageError("This journey could not be archived. Please try again.");
+      setSaving(false);
+      setStorageError("These changes could not be saved. Please try again.");
     }
-  }, [canArchive, photos, formData, router]);
+  }, [canSave, journey, photos, formData, router]);
 
   const displayTitle = deriveTitle(
     formData.title,
@@ -182,12 +241,45 @@ export default function NewJourneyPage() {
     formData.startDate
   );
 
+  if (!loaded) {
+    return (
+      <div>
+        <TopNav />
+        <div className="flex items-center justify-center py-32">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-muted border-t-accent" />
+        </div>
+      </div>
+    );
+  }
+
+  if (!journey) {
+    return (
+      <div>
+        <TopNav />
+        <main className="mx-auto max-w-7xl px-page-mobile py-20 text-center lg:px-page-desktop">
+          <h2 className="text-2xl font-semibold text-foreground">
+            Journey not found
+          </h2>
+          <p className="mt-3 text-muted">
+            This journey may have been deleted or the link is incorrect.
+          </p>
+          <button
+            onClick={() => router.push("/")}
+            className="mt-6 rounded-button bg-foreground px-6 py-2.5 text-sm font-medium text-white"
+          >
+            Back to Home
+          </button>
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen">
       <TopNav />
       <main className="mx-auto max-w-5xl px-page-mobile py-10 lg:px-page-desktop lg:py-14">
         <h1 className="mb-10 text-[28px] font-semibold tracking-tight text-foreground lg:text-[34px]">
-          New Journey
+          Edit Journey
         </h1>
 
         <div className="grid gap-10 lg:grid-cols-2">
@@ -196,7 +288,7 @@ export default function NewJourneyPage() {
             <h2 className="mb-5 text-[18px] font-semibold text-foreground">
               Journey Info
             </h2>
-            <JourneyForm onChange={setFormData} />
+            <JourneyForm initial={formData} onChange={setFormData} />
           </div>
 
           {/* Right: Upload */}
@@ -224,7 +316,7 @@ export default function NewJourneyPage() {
           </div>
         </div>
 
-        {/* Archive action */}
+        {/* Save action */}
         <div className="mt-12 border-t border-border pt-8">
           <div className="flex flex-col items-stretch gap-5 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
@@ -236,18 +328,24 @@ export default function NewJourneyPage() {
                   ? `${photos.length} photo${photos.length > 1 ? "s" : ""}`
                   : "No photos yet"}
                 {" · "}
-                {formData.location
-                  ? formData.location
-                  : "Add a location to archive"}
+                {formData.location || "Add a location to save"}
               </p>
             </div>
-            <button
-              onClick={handleArchive}
-              disabled={!canArchive}
-              className="w-full rounded-button bg-accent px-8 py-3 text-[15px] font-semibold text-white transition hover:bg-accent/85 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
-            >
-              {archiving ? "Archiving…" : "Archive Journey"}
-            </button>
+            <div className="flex gap-3">
+              <button
+                onClick={() => router.push(`/journeys/${id}`)}
+                className="rounded-button border border-border px-6 py-3 text-[15px] font-medium text-foreground transition hover:bg-surface"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={!canSave}
+                className="w-full rounded-button bg-accent px-8 py-3 text-[15px] font-semibold text-white transition hover:bg-accent/85 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
+              >
+                {saving ? "Saving…" : "Save Changes"}
+              </button>
+            </div>
           </div>
         </div>
       </main>

@@ -8,6 +8,7 @@ interface PhotoGridProps {
   onSetCover: (id: string) => void;
   onToggleHighlight: (id: string) => void;
   onRemove: (id: string) => void;
+  onSetNote: (id: string, note: string) => void;
 }
 
 export default function PhotoGrid({
@@ -15,6 +16,7 @@ export default function PhotoGrid({
   onSetCover,
   onToggleHighlight,
   onRemove,
+  onSetNote,
 }: PhotoGridProps) {
   if (photos.length === 0) return null;
 
@@ -27,6 +29,7 @@ export default function PhotoGrid({
           onSetCover={onSetCover}
           onToggleHighlight={onToggleHighlight}
           onRemove={onRemove}
+          onSetNote={onSetNote}
         />
       ))}
     </div>

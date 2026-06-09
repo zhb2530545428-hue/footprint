@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import type { Journey, PhotoCategory } from "@/lib/types";
-import { getJourney } from "@/lib/storage";
+import { getJourney, revokePhotoObjectUrls } from "@/lib/storage";
 import { deriveTitle, formatDateRange } from "@/lib/utils";
 import TopNav from "@/components/TopNav";
 import SegmentedTabs from "@/components/SegmentedTabs";
@@ -28,9 +28,27 @@ export default function JourneyDetailPage() {
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
 
   useEffect(() => {
-    const found = getJourney(id);
-    setJourney(found ?? null);
-    setLoaded(true);
+    let cancelled = false;
+    let loadedJourney: Journey | undefined;
+
+    void getJourney(id)
+      .then((found) => {
+        loadedJourney = found;
+        if (cancelled) {
+          if (found) revokePhotoObjectUrls(found.photos);
+          return;
+        }
+        setJourney(found ?? null);
+        setLoaded(true);
+      })
+      .catch(() => {
+        if (!cancelled) setLoaded(true);
+      });
+
+    return () => {
+      cancelled = true;
+      if (loadedJourney) revokePhotoObjectUrls(loadedJourney.photos);
+    };
   }, [id]);
 
   const lightboxPhotos = useMemo(() => {
@@ -148,6 +166,16 @@ export default function JourneyDetailPage() {
               {journey.notes}
             </p>
           )}
+
+          {/* Edit button */}
+          <div className="mt-6">
+            <button
+              onClick={() => router.push(`/journeys/${journey.id}/edit`)}
+              className="rounded-button border border-border px-5 py-2 text-sm font-medium text-foreground transition hover:bg-surface"
+            >
+              Edit Journey
+            </button>
+          </div>
         </div>
 
         {/* Highlights */}
