@@ -1,22 +1,26 @@
 "use client";
 
-import type { JourneyPhoto } from "@/lib/types";
+import type { JourneyPhoto, PhotoCategory } from "@/lib/types";
 import PhotoTile from "./PhotoTile";
 
 interface PhotoGridProps {
   photos: JourneyPhoto[];
+  categories?: PhotoCategory[];
   onSetCover: (id: string) => void;
   onToggleHighlight: (id: string) => void;
   onRemove: (id: string) => void;
   onSetNote: (id: string, note: string) => void;
+  onSetCategory?: (photoId: string, categoryId: string) => void;
 }
 
 export default function PhotoGrid({
   photos,
+  categories,
   onSetCover,
   onToggleHighlight,
   onRemove,
   onSetNote,
+  onSetCategory,
 }: PhotoGridProps) {
   if (photos.length === 0) return null;
 
@@ -26,10 +30,12 @@ export default function PhotoGrid({
         <PhotoTile
           key={photo.id}
           photo={photo}
+          categories={categories}
           onSetCover={onSetCover}
           onToggleHighlight={onToggleHighlight}
           onRemove={onRemove}
           onSetNote={onSetNote}
+          onSetCategory={onSetCategory}
         />
       ))}
     </div>

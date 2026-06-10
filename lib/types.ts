@@ -1,12 +1,11 @@
 export type JourneyStatus = "planned" | "draft" | "curation" | "archived" | "trashed";
 
-export type PhotoCategory =
-  | "all"
-  | "people"
-  | "landscape"
-  | "food"
-  | "transport"
-  | "other";
+export interface PhotoCategory {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt?: string;
+}
 
 export interface JourneyPhoto {
   id: string;
@@ -15,7 +14,7 @@ export interface JourneyPhoto {
   fileName?: string;
   isCover: boolean;
   isHighlight: boolean;
-  category?: PhotoCategory;
+  categoryId?: string;
   note?: string;
   hasNote: boolean;
   createdAt: string;
@@ -32,6 +31,7 @@ export interface Journey {
   status: JourneyStatus;
   coverPhotoId?: string;
   photos: JourneyPhoto[];
+  categories: PhotoCategory[];
   createdAt: string;
   updatedAt: string;
 }

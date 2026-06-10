@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import type { Journey, JourneyPhoto } from "@/lib/types";
-import { revokePhotoObjectUrls, saveJourney } from "@/lib/storage";
+import { revokePhotoObjectUrls, saveJourney, createDefaultCategories } from "@/lib/storage";
 import { deletePhotoBlobs, savePhotoBlob } from "@/lib/image-storage";
 import { generateId, deriveTitle } from "@/lib/utils";
 import TopNav from "@/components/TopNav";
@@ -60,7 +60,7 @@ export default function NewJourneyPage() {
         fileName: file.name,
         isCover: false,
         isHighlight: false,
-        category: "other",
+        categoryId: "default-other",
         hasNote: false,
         createdAt: new Date().toISOString(),
       }));
@@ -162,6 +162,7 @@ export default function NewJourneyPage() {
       status: "archived",
       coverPhotoId,
       photos: finalPhotos,
+      categories: createDefaultCategories(now),
       createdAt: now,
       updatedAt: now,
     };

@@ -1,22 +1,26 @@
 "use client";
 
 import { useState } from "react";
-import type { JourneyPhoto } from "@/lib/types";
+import type { JourneyPhoto, PhotoCategory } from "@/lib/types";
 
 interface PhotoTileProps {
   photo: JourneyPhoto;
+  categories?: PhotoCategory[];
   onSetCover: (id: string) => void;
   onToggleHighlight: (id: string) => void;
   onRemove: (id: string) => void;
   onSetNote: (id: string, note: string) => void;
+  onSetCategory?: (photoId: string, categoryId: string) => void;
 }
 
 export default function PhotoTile({
   photo,
+  categories,
   onSetCover,
   onToggleHighlight,
   onRemove,
   onSetNote,
+  onSetCategory,
 }: PhotoTileProps) {
   const [showNoteInput, setShowNoteInput] = useState(false);
   const [draftNote, setDraftNote] = useState(photo.note ?? "");
@@ -100,6 +104,29 @@ export default function PhotoTile({
                 Save
               </button>
             </div>
+          </div>
+        )}
+
+        {/* Category selector */}
+        {categories && categories.length > 0 && onSetCategory && (
+          <div
+            className="mx-2 mb-1 flex items-center gap-1.5 rounded-lg bg-white/90 px-2 py-1.5 opacity-0 transition group-hover:opacity-100"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <label className="text-[10px] font-medium text-muted whitespace-nowrap">
+              Category
+            </label>
+            <select
+              value={photo.categoryId ?? "default-other"}
+              onChange={(e) => onSetCategory(photo.id, e.target.value)}
+              className="min-w-0 flex-1 rounded border border-border bg-white px-1.5 py-0.5 text-[11px] text-foreground outline-none"
+            >
+              {categories.map((cat) => (
+                <option key={cat.id} value={cat.id}>
+                  {cat.name}
+                </option>
+              ))}
+            </select>
           </div>
         )}
 

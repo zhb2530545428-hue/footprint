@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
-import type { Journey, JourneyPhoto } from "@/lib/types";
+import type { Journey, JourneyPhoto, PhotoCategory } from "@/lib/types";
 import {
   getJourney,
   moveJourneyToTrash,
   revokePhotoObjectUrls,
   updateJourney,
+  createDefaultCategories,
 } from "@/lib/storage";
 import { deletePhotoBlobs, savePhotoBlob } from "@/lib/image-storage";
 import { generateId, deriveTitle } from "@/lib/utils";
@@ -34,6 +35,8 @@ export default function EditJourneyPage() {
     notes: "",
   });
   const [photos, setPhotos] = useState<JourneyPhoto[]>([]);
+  const [categories, setCategories] = useState<PhotoCategory[]>([]);
+  const [activeFilter, setActiveFilter] = useState("all");
   const [saving, setSaving] = useState(false);
   const [storageError, setStorageError] = useState("");
   const photosRef = useRef<JourneyPhoto[]>([]);
@@ -41,6 +44,16 @@ export default function EditJourneyPage() {
   const savedRef = useRef(false);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+
+  // Category management state
+  const [addingCategory, setAddingCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [renamingCategoryId, setRenamingCategoryId] = useState<string | null>(null);
+  const [renamingCategoryName, setRenamingCategoryName] = useState("");
+  const [deleteCategoryModal, setDeleteCategoryModal] = useState<{
+    category: PhotoCategory;
+    photoCount: number;
+  } | null>(null);
 
   useEffect(() => {
     photosRef.current = photos;
@@ -65,6 +78,7 @@ export default function EditJourneyPage() {
         );
         photosRef.current = found.photos;
         setJourney(found);
+        setCategories(found.categories ?? createDefaultCategories());
         setFormData({
           title: found.title ?? "",
           location: found.location,
@@ -115,7 +129,7 @@ export default function EditJourneyPage() {
         fileName: file.name,
         isCover: false,
         isHighlight: false,
-        category: "other",
+        categoryId: "default-other",
         hasNote: false,
         createdAt: new Date().toISOString(),
       }));
@@ -189,6 +203,96 @@ export default function EditJourneyPage() {
     });
   }, []);
 
+  const handleSetCategory = useCallback((photoId: string, categoryId: string) => {
+    setPhotos((prev) =>
+      prev.map((p) => (p.id === photoId ? { ...p, categoryId } : p))
+    );
+  }, []);
+
+  const handleAddCategory = useCallback(() => {
+    const name = newCategoryName.trim();
+    if (!name) return;
+    setCategories((prev) => [
+      ...prev,
+      { id: generateId(), name, createdAt: new Date().toISOString() },
+    ]);
+    setNewCategoryName("");
+    setAddingCategory(false);
+  }, [newCategoryName]);
+
+  const handleRenameCategory = useCallback(
+    (categoryId: string) => {
+      const name = renamingCategoryName.trim();
+      if (!name) {
+        setRenamingCategoryId(null);
+        return;
+      }
+      setCategories((prev) =>
+        prev.map((c) =>
+          c.id === categoryId ? { ...c, name, updatedAt: new Date().toISOString() } : c
+        )
+      );
+      setRenamingCategoryId(null);
+    },
+    [renamingCategoryName]
+  );
+
+  const handleDeleteCategory = useCallback(
+    (categoryId: string) => {
+      const cat = categories.find((c) => c.id === categoryId);
+      if (!cat) return;
+
+      const photoCount = photos.filter((p) => p.categoryId === categoryId).length;
+
+      if (photoCount > 0) {
+        // Show confirmation modal
+        setDeleteCategoryModal({ category: cat, photoCount });
+        return;
+      }
+
+      // No photos — delete immediately
+      setCategories((prev) => prev.filter((c) => c.id !== categoryId));
+    },
+    [categories, photos]
+  );
+
+  const confirmDeleteCategory = useCallback(() => {
+    if (!deleteCategoryModal) return;
+    const { category } = deleteCategoryModal;
+
+    // Find "Other" or first remaining category as fallback
+    const other =
+      categories.find((c) => c.id === "default-other" && c.id !== category.id) ??
+      categories.find((c) => c.id !== category.id);
+
+    const fallbackId = other?.id ?? "default-other";
+
+    // If no "Other" exists yet, create it
+    if (!other) {
+      setCategories((prev) => [
+        ...prev.filter((c) => c.id !== category.id),
+        { id: "default-other", name: "Other", createdAt: new Date().toISOString() },
+      ]);
+    } else {
+      setCategories((prev) => prev.filter((c) => c.id !== category.id));
+    }
+
+    // Reassign photos
+    setPhotos((prev) =>
+      prev.map((p) =>
+        p.categoryId === category.id ? { ...p, categoryId: fallbackId } : p
+      )
+    );
+
+    setDeleteCategoryModal(null);
+  }, [deleteCategoryModal, categories]);
+
+  const filteredPhotos = useMemo(() => {
+    if (activeFilter === "all") return photos;
+    if (activeFilter === "highlights") return photos.filter((p) => p.isHighlight);
+    return photos.filter((p) => p.categoryId === activeFilter);
+  }, [photos, activeFilter]);
+
   const canSave = formData.location.trim().length > 0 && !saving;
 
   const handleSave = useCallback(async () => {
@@ -227,6 +331,7 @@ export default function EditJourneyPage() {
       notes: formData.notes.trim() || undefined,
       coverPhotoId,
       photos: finalPhotos,
+      categories,
     };
 
     try {
@@ -237,7 +342,7 @@ export default function EditJourneyPage() {
       setSaving(false);
       setStorageError("These changes could not be saved. Please try again.");
     }
-  }, [canSave, journey, photos, formData, router]);
+  }, [canSave, journey, photos, categories, formData, router]);
 
   const handleDelete = useCallback(async () => {
     if (!journey) return;
@@ -321,15 +426,139 @@ export default function EditJourneyPage() {
               </p>
             )}
 
-            {/* Photo grid */}
+            {/* Category Management */}
             <div className="mt-6">
+              <h3 className="mb-3 text-[15px] font-semibold text-foreground">
+                Categories
+              </h3>
+              <div className="flex flex-wrap items-center gap-2">
+                {categories.map((cat) => (
+                  <span
+                    key={cat.id}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-border bg-white px-3 py-1.5 text-[13px] text-foreground"
+                  >
+                    {renamingCategoryId === cat.id ? (
+                      <input
+                        value={renamingCategoryName}
+                        onChange={(e) => setRenamingCategoryName(e.target.value)}
+                        onBlur={() => handleRenameCategory(cat.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") handleRenameCategory(cat.id);
+                          if (e.key === "Escape") setRenamingCategoryId(null);
+                        }}
+                        className="w-24 rounded border border-border px-1.5 py-0.5 text-[13px] outline-none focus:border-accent"
+                        autoFocus
+                      />
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRenamingCategoryId(cat.id);
+                            setRenamingCategoryName(cat.name);
+                          }}
+                          className="hover:text-accent"
+                          title="Rename category"
+                        >
+                          {cat.name}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteCategory(cat.id)}
+                          className="ml-0.5 text-muted hover:text-red-500"
+                          title="Delete category"
+                        >
+                          ×
+                        </button>
+                      </>
+                    )}
+                  </span>
+                ))}
+
+                {addingCategory ? (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-accent bg-white px-3 py-1.5">
+                    <input
+                      value={newCategoryName}
+                      onChange={(e) => setNewCategoryName(e.target.value)}
+                      onBlur={() => {
+                        if (!newCategoryName.trim()) setAddingCategory(false);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleAddCategory();
+                        if (e.key === "Escape") {
+                          setAddingCategory(false);
+                          setNewCategoryName("");
+                        }
+                      }}
+                      placeholder="Category name"
+                      className="w-28 rounded border-0 px-0 py-0.5 text-[13px] outline-none"
+                      autoFocus
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddCategory}
+                      disabled={!newCategoryName.trim()}
+                      className="text-[13px] font-medium text-accent disabled:opacity-40"
+                    >
+                      Add
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setAddingCategory(true)}
+                    className="inline-flex items-center gap-1 rounded-full border border-dashed border-muted px-3 py-1.5 text-[13px] text-muted hover:border-accent hover:text-accent"
+                  >
+                    + Add Category
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Category Filter + Photo grid */}
+            <div className="mt-6">
+              <div className="mb-4 overflow-x-auto pb-1">
+                <div className="inline-flex min-w-max rounded-xl bg-surface p-1">
+                  {[
+                    { key: "all", label: `All (${photos.length})` },
+                    {
+                      key: "highlights",
+                      label: `Highlights (${photos.filter((p) => p.isHighlight).length})`,
+                    },
+                    ...categories.map((c) => ({
+                      key: c.id,
+                      label: `${c.name} (${photos.filter((p) => p.categoryId === c.id).length})`,
+                    })),
+                  ].map((tab) => (
+                    <button
+                      type="button"
+                      key={tab.key}
+                      onClick={() => setActiveFilter(tab.key)}
+                      className={`whitespace-nowrap rounded-lg px-3 py-2 text-[13px] font-medium transition sm:px-4 ${
+                        activeFilter === tab.key
+                          ? "bg-white text-foreground shadow-sm"
+                          : "text-muted hover:text-foreground"
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <PhotoGrid
-                photos={photos}
+                photos={filteredPhotos}
+                categories={categories}
                 onSetCover={handleSetCover}
                 onToggleHighlight={handleToggleHighlight}
                 onRemove={handleRemove}
                 onSetNote={handleSetNote}
+                onSetCategory={handleSetCategory}
               />
+              {filteredPhotos.length === 0 && photos.length > 0 && (
+                <p className="mt-6 py-8 text-center text-[14px] text-muted">
+                  No photos in this category.
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -385,7 +614,7 @@ export default function EditJourneyPage() {
           </button>
         </div>
 
-        {/* Delete Confirmation Modal */}
+        {/* Delete Journey Confirmation Modal */}
         <ConfirmModal
           open={deleteModalOpen}
           title="Move to Trash"
@@ -394,6 +623,21 @@ export default function EditJourneyPage() {
           confirmVariant="danger"
           onConfirm={handleDelete}
           onCancel={() => setDeleteModalOpen(false)}
+        />
+
+        {/* Delete Category Confirmation Modal */}
+        <ConfirmModal
+          open={deleteCategoryModal !== null}
+          title="Delete Category"
+          message={
+            deleteCategoryModal
+              ? `"${deleteCategoryModal.category.name}" contains ${deleteCategoryModal.photoCount} photo${deleteCategoryModal.photoCount > 1 ? "s" : ""}. Deleting a category will not delete photos. They will be moved to "Other" instead.`
+              : ""
+          }
+          confirmLabel="Delete Category"
+          confirmVariant="danger"
+          onConfirm={confirmDeleteCategory}
+          onCancel={() => setDeleteCategoryModal(null)}
         />
       </main>
     </div>

@@ -1,4 +1,4 @@
-import type { Journey, JourneyPhoto } from "./types";
+import type { Journey, JourneyPhoto, PhotoCategory } from "./types";
 import {
   dataUrlToBlob,
   deletePhotoBlobs,
@@ -7,6 +7,27 @@ import {
 } from "./image-storage";
 
 const STORAGE_KEY = "footprint.journeys";
+
+/** Map legacy string category values to default category IDs */
+const LEGACY_CATEGORY_MAP: Record<string, string> = {
+  people: "default-people",
+  landscape: "default-landscape",
+  food: "default-food",
+  transport: "default-transport",
+  other: "default-other",
+};
+
+/** Create the 5 default starter categories for a new Journey */
+export function createDefaultCategories(now?: string): PhotoCategory[] {
+  const ts = now ?? new Date().toISOString();
+  return [
+    { id: "default-people", name: "People", createdAt: ts },
+    { id: "default-landscape", name: "Landscape", createdAt: ts },
+    { id: "default-food", name: "Food", createdAt: ts },
+    { id: "default-transport", name: "Transport", createdAt: ts },
+    { id: "default-other", name: "Other", createdAt: ts },
+  ];
+}
 
 function isBrowser(): boolean {
   return typeof window !== "undefined";
@@ -47,42 +68,73 @@ async function hydrateJourney(journey: Journey): Promise<{
   migrated: boolean;
 }> {
   let migrated = false;
-  const photos = [];
+
+  // Migrate categories: add defaults if missing
+  let categories: PhotoCategory[] = journey.categories;
+  if (!categories || !Array.isArray(categories) || categories.length === 0) {
+    categories = createDefaultCategories(journey.createdAt);
+    migrated = true;
+  }
+
+  const photos: JourneyPhoto[] = [];
 
   for (const photo of journey.photos) {
+    let processed: JourneyPhoto & { category?: string } = { ...photo };
+
+    // --- URL hydration (existing logic) ---
     if (photo.url.startsWith("data:")) {
       const storageKey = photo.storageKey ?? photo.id;
       const blob = await dataUrlToBlob(photo.url);
       await savePhotoBlob(storageKey, blob);
-      photos.push({
-        ...photo,
+      processed = {
+        ...processed,
         storageKey,
         url: URL.createObjectURL(blob),
-      });
+      };
       migrated = true;
-      continue;
-    }
-
-    if (photo.storageKey) {
+    } else if (photo.storageKey) {
       const blob = await getPhotoBlob(photo.storageKey);
-      photos.push({
-        ...photo,
+      processed = {
+        ...processed,
         url: blob ? URL.createObjectURL(blob) : "",
-      });
-      continue;
-    }
-
-    if (photo.url.startsWith("blob:")) {
-      photos.push({ ...photo, url: "" });
+      };
+    } else if (photo.url.startsWith("blob:")) {
+      processed = { ...processed, url: "" };
       migrated = true;
-      continue;
     }
 
-    photos.push(photo);
+    // --- Category migration: convert legacy string category to categoryId ---
+    if (!processed.categoryId) {
+      const legacyPhoto = photo as JourneyPhoto & { category?: string };
+      const oldCategory = legacyPhoto.category;
+      if (oldCategory && typeof oldCategory === "string" && oldCategory !== "all") {
+        const legacyId = LEGACY_CATEGORY_MAP[oldCategory];
+        if (legacyId) {
+          migrated = true;
+          const { category: _omit, ...rest } = processed;
+          processed = { ...rest, categoryId: legacyId };
+        }
+      }
+    }
+
+    // If still no categoryId, default to Other
+    if (!processed.categoryId) {
+      migrated = true;
+      const { category: _omit, ...rest } = processed;
+      processed = { ...rest, categoryId: "default-other" };
+    }
+
+    // Strip any lingering legacy `category` field for cleanliness
+    if ("category" in processed) {
+      const { category: _omit, ...rest } = processed;
+      processed = rest;
+    }
+
+    photos.push(processed as JourneyPhoto);
   }
 
   return {
-    journey: { ...journey, photos },
+    journey: { ...journey, photos, categories },
     migrated,
   };
 }

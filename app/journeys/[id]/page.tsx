@@ -2,20 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import type { Journey, PhotoCategory } from "@/lib/types";
+import type { Journey } from "@/lib/types";
 import { getJourney, revokePhotoObjectUrls } from "@/lib/storage";
 import { deriveTitle, formatDateRange } from "@/lib/utils";
 import TopNav from "@/components/TopNav";
 import SegmentedTabs from "@/components/SegmentedTabs";
 import PhotoLightbox from "@/components/PhotoLightbox";
-
-const CATEGORY_TABS: { key: PhotoCategory; label: string }[] = [
-  { key: "all", label: "All" },
-  { key: "people", label: "People" },
-  { key: "landscape", label: "Landscape" },
-  { key: "food", label: "Food" },
-  { key: "other", label: "Other" },
-];
 
 export default function JourneyDetailPage() {
   const params = useParams();
@@ -24,7 +16,7 @@ export default function JourneyDetailPage() {
 
   const [journey, setJourney] = useState<Journey | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const [activeTab, setActiveTab] = useState<PhotoCategory>("all");
+  const [activeTab, setActiveTab] = useState("all");
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
 
   useEffect(() => {
@@ -54,7 +46,8 @@ export default function JourneyDetailPage() {
   const lightboxPhotos = useMemo(() => {
     if (!journey) return [];
     if (activeTab === "all") return journey.photos;
-    return journey.photos.filter((p) => p.category === activeTab);
+    if (activeTab === "highlights") return journey.photos.filter((p) => p.isHighlight);
+    return journey.photos.filter((p) => p.categoryId === activeTab);
   }, [journey, activeTab]);
 
   const lightboxPhoto =
@@ -219,10 +212,14 @@ export default function JourneyDetailPage() {
             </h2>
             <div className="w-full overflow-x-auto pb-1 sm:w-auto sm:pb-0">
               <SegmentedTabs
-                tabs={CATEGORY_TABS}
+                tabs={[
+                  { key: "all", label: "All" },
+                  { key: "highlights", label: "Highlights" },
+                  ...journey.categories.map((c) => ({ key: c.id, label: c.name })),
+                ]}
                 active={activeTab}
                 onChange={(key) => {
-                  setActiveTab(key as PhotoCategory);
+                  setActiveTab(key);
                   setLightboxIndex(null);
                 }}
               />
