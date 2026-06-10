@@ -46,7 +46,7 @@ export function formatDateRange(start?: string, end?: string): string {
   return `${sMonth} ${sDay}, ${s.getFullYear()} – ${eMonth} ${eDay}, ${e.getFullYear()}`;
 }
 
-/** Format structured China location fields into a display string like "浙江 · 杭州 / 湖州 · 西湖区" */
+/** Format structured China province + cities into a display string like "浙江 · 杭州 / 湖州". Detailed address is excluded — kept separate for detail views. */
 export function formatJourneyLocation(input: {
   province?: string;
   cities?: string[];
@@ -65,7 +65,7 @@ export function formatJourneyLocation(input: {
     .filter(Boolean)
     .join(" / ");
 
-  const parts = [input.province, cityText, input.address]
+  const parts = [input.province, cityText]
     .map((part) => part?.trim())
     .filter(Boolean);
 
