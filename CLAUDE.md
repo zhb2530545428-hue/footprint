@@ -119,3 +119,11 @@ JourneyPhoto: { id, url, fileName?, isCover, isHighlight, category?, note?, hasN
 ### 4. 目标驱动
 
 把任务转化为可验证的目标，给出验证标准。多步骤任务先列出步骤和每步的验证方式。
+
+### 5. 推送后给出仓库链接
+
+每次 `git push` 完成后，必须在回复末尾附上 GitHub 仓库网址：
+
+```
+https://github.com/zhb2530545428-hue/footprint
+```
