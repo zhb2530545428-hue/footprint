@@ -3,7 +3,7 @@
 import Link from "next/link";
 import type { Journey } from "@/lib/types";
 import type { FootprintSettings } from "@/lib/settings";
-import { deriveTitle, formatDateRange } from "@/lib/utils";
+import { deriveTitle, formatDateRange, formatJourneyLocation } from "@/lib/utils";
 
 interface JourneyCardProps {
   journey: Journey;
@@ -14,9 +14,18 @@ export default function JourneyCard({ journey, settings }: JourneyCardProps) {
   const coverPhoto = journey.photos.find(
     (p) => p.id === journey.coverPhotoId
   );
+
+  // Derive display location from structured fields, falling back to legacy location
+  const displayLocation = formatJourneyLocation({
+    province: journey.locationProvince,
+    cities: journey.locationCities,
+    city: journey.locationCity,
+    fallback: journey.location,
+  });
+
   const displayTitle = deriveTitle(
     journey.title,
-    journey.location,
+    displayLocation,
     journey.startDate
   );
   const dateRange = formatDateRange(journey.startDate, journey.endDate);
@@ -49,7 +58,7 @@ export default function JourneyCard({ journey, settings }: JourneyCardProps) {
           <div className="px-4 py-3">
             {showLocation && (
               <p className="text-[15px] font-semibold text-foreground leading-snug">
-                {journey.location}
+                {displayLocation}
               </p>
             )}
             {showTime && dateRange && (
