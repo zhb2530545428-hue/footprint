@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { computeFloatingCardPosition } from "@/lib/note-tooltip-position";
 
 interface NoteTooltipProps {
   note: string;
@@ -19,9 +20,11 @@ interface NoteTooltipProps {
 export default function NoteTooltip({ note, children, delay = 1000 }: NoteTooltipProps) {
   const [mounted, setMounted] = useState(false);
   const [visible, setVisible] = useState(false);
+  const [positioned, setPositioned] = useState(false);
   const [entered, setEntered] = useState(false);
   const [cardPos, setCardPos] = useState({ left: 0, top: 0 });
 
+  const cardRef = useRef<HTMLDivElement | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wasTouchRef = useRef(false);
   const supportsHoverRef = useRef(true);
@@ -35,16 +38,40 @@ export default function NoteTooltip({ note, children, delay = 1000 }: NoteToolti
     ).matches;
   }, []);
 
-  // Entrance animation: after the portal mounts we flip `entered` on the
-  // next animation frame so the browser paints the "before" state first.
+  // Measure the rendered card before revealing it so collision handling uses
+  // the note's real height instead of a large fixed estimate.
   useEffect(() => {
     if (!visible) {
+      setPositioned(false);
+      return;
+    }
+
+    const card = cardRef.current;
+    if (!card) return;
+
+    const rect = card.getBoundingClientRect();
+    setCardPos(
+      computeFloatingCardPosition({
+        cursorX: cursorRef.current.x,
+        cursorY: cursorRef.current.y,
+        cardWidth: rect.width,
+        cardHeight: rect.height,
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+      })
+    );
+    setPositioned(true);
+  }, [visible]);
+
+  // Entrance animation starts only after the card has its final position.
+  useEffect(() => {
+    if (!positioned) {
       setEntered(false);
       return;
     }
     const frame = requestAnimationFrame(() => setEntered(true));
     return () => cancelAnimationFrame(frame);
-  }, [visible]);
+  }, [positioned]);
 
   const clearTimer = useCallback(() => {
     if (timerRef.current) {
@@ -60,7 +87,6 @@ export default function NoteTooltip({ note, children, delay = 1000 }: NoteToolti
       cursorRef.current = { x: e.clientX, y: e.clientY };
       clearTimer();
       timerRef.current = setTimeout(() => {
-        setCardPos(computePosition(cursorRef.current.x, cursorRef.current.y));
         setVisible(true);
       }, delay);
     },
@@ -103,6 +129,7 @@ export default function NoteTooltip({ note, children, delay = 1000 }: NoteToolti
         !wasTouchRef.current &&
         createPortal(
           <div
+            ref={cardRef}
             className={[
               // Escape the photo tile / grid stacking context
               "pointer-events-none fixed z-[100]",
@@ -123,7 +150,11 @@ export default function NoteTooltip({ note, children, delay = 1000 }: NoteToolti
                 ? "opacity-100 scale-100 translate-y-0"
                 : "opacity-0 scale-[0.96] translate-y-1.5",
             ].join(" ")}
-            style={{ left: cardPos.left, top: cardPos.top }}
+            style={{
+              left: cardPos.left,
+              top: cardPos.top,
+              visibility: positioned ? "visible" : "hidden",
+            }}
           >
             {trimmed}
           </div>,
@@ -131,41 +162,4 @@ export default function NoteTooltip({ note, children, delay = 1000 }: NoteToolti
         )}
     </div>
   );
-}
-
-// ---------------------------------------------------------------------------
-// Viewport collision helper
-// ---------------------------------------------------------------------------
-
-const CARD_W = 360;
-const CARD_H_EST = 520;
-const OFFSET = 16;
-const MARGIN = 16;
-
-function computePosition(cx: number, cy: number): { left: number; top: number } {
-  if (typeof window === "undefined") return { left: 0, top: 0 };
-
-  const vw = window.innerWidth;
-  const vh = window.innerHeight;
-
-  let left = cx + OFFSET;
-  let top = cy + OFFSET;
-
-  // If the card would overflow the right viewport edge, place it to the
-  // left of the cursor instead.
-  if (left + CARD_W + MARGIN > vw) {
-    left = cx - CARD_W - OFFSET;
-  }
-
-  // If the card would overflow the bottom viewport edge, place it above
-  // the cursor instead.
-  if (top + CARD_H_EST + MARGIN > vh) {
-    top = cy - CARD_H_EST - OFFSET;
-  }
-
-  // Clamp within the viewport with at least MARGIN pixels of breathing room.
-  left = Math.max(MARGIN, Math.min(left, vw - CARD_W - MARGIN));
-  top = Math.max(MARGIN, top);
-
-  return { left, top };
 }
