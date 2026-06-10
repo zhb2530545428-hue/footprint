@@ -212,11 +212,7 @@ export default function JourneyDetailPage() {
             </h2>
             <div className="w-full overflow-x-auto pb-1 sm:w-auto sm:pb-0">
               <SegmentedTabs
-                tabs={[
-                  { key: "all", label: "All" },
-                  { key: "highlights", label: "Highlights" },
-                  ...journey.categories.map((c) => ({ key: c.id, label: c.name })),
-                ]}
+                tabs={buildCategoryTabs(journey)}
                 active={activeTab}
                 onChange={(key) => {
                   setActiveTab(key);
@@ -272,4 +268,20 @@ export default function JourneyDetailPage() {
       />
     </div>
   );
+}
+
+function buildCategoryTabs(journey: Journey): { key: string; label: string }[] {
+  const tabs: { key: string; label: string }[] = [
+    { key: "all", label: `All (${journey.photos.length})` },
+    { key: "highlights", label: `Highlights (${journey.photos.filter((p) => p.isHighlight).length})` },
+  ];
+
+  for (const cat of journey.categories) {
+    const count = journey.photos.filter((p) => p.categoryId === cat.id).length;
+    if (count > 0) {
+      tabs.push({ key: cat.id, label: `${cat.name} (${count})` });
+    }
+  }
+
+  return tabs;
 }
