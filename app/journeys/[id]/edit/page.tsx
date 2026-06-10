@@ -18,6 +18,9 @@ import type { JourneyFormData } from "@/components/JourneyForm";
 import UploadDropzone from "@/components/UploadDropzone";
 import PhotoGrid from "@/components/PhotoGrid";
 import ConfirmModal from "@/components/ConfirmModal";
+import EditJourneyHeader from "@/components/EditJourneyHeader";
+import CoverPhotoPanel from "@/components/CoverPhotoPanel";
+import HighlightsPreview from "@/components/HighlightsPreview";
 
 export default function EditJourneyPage() {
   const params = useParams();
@@ -48,7 +51,9 @@ export default function EditJourneyPage() {
   // Category management state
   const [addingCategory, setAddingCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
-  const [renamingCategoryId, setRenamingCategoryId] = useState<string | null>(null);
+  const [renamingCategoryId, setRenamingCategoryId] = useState<string | null>(
+    null
+  );
   const [renamingCategoryName, setRenamingCategoryName] = useState("");
   const [deleteCategoryModal, setDeleteCategoryModal] = useState<{
     category: PhotoCategory;
@@ -74,7 +79,9 @@ export default function EditJourneyPage() {
         }
 
         originalStorageKeysRef.current = new Set(
-          found.photos.flatMap((photo) => (photo.storageKey ? [photo.storageKey] : []))
+          found.photos.flatMap((photo) =>
+            photo.storageKey ? [photo.storageKey] : []
+          )
         );
         photosRef.current = found.photos;
         setJourney(found);
@@ -92,7 +99,9 @@ export default function EditJourneyPage() {
       })
       .catch(() => {
         if (!cancelled) {
-          setStorageError("This journey could not be loaded from browser storage.");
+          setStorageError(
+            "This journey could not be loaded from browser storage."
+          );
           setLoaded(true);
         }
       });
@@ -104,7 +113,8 @@ export default function EditJourneyPage() {
       if (!savedRef.current) {
         void deletePhotoBlobs(
           currentPhotos.flatMap((photo) =>
-            photo.storageKey && !originalStorageKeysRef.current.has(photo.storageKey)
+            photo.storageKey &&
+            !originalStorageKeysRef.current.has(photo.storageKey)
               ? [photo.storageKey]
               : []
           )
@@ -145,8 +155,12 @@ export default function EditJourneyPage() {
         return next;
       });
     } catch {
-      await deletePhotoBlobs(prepared.map(({ id }) => id)).catch(() => undefined);
-      setStorageError("These photos could not be saved in this browser. Please try again.");
+      await deletePhotoBlobs(prepared.map(({ id }) => id)).catch(
+        () => undefined
+      );
+      setStorageError(
+        "These photos could not be saved in this browser. Please try again."
+      );
     }
   }, []);
 
@@ -170,7 +184,9 @@ export default function EditJourneyPage() {
   const handleSetNote = useCallback((photoId: string, note: string) => {
     setPhotos((prev) =>
       prev.map((p) =>
-        p.id === photoId ? { ...p, note: note || undefined, hasNote: note.length > 0 } : p
+        p.id === photoId
+          ? { ...p, note: note || undefined, hasNote: note.length > 0 }
+          : p
       )
     );
   }, []);
@@ -183,7 +199,9 @@ export default function EditJourneyPage() {
       !originalStorageKeysRef.current.has(removed.storageKey)
     ) {
       void deletePhotoBlobs([removed.storageKey]).catch(() => {
-        setStorageError("The photo was removed, but its browser storage could not be cleaned up.");
+        setStorageError(
+          "The photo was removed, but its browser storage could not be cleaned up."
+        );
       });
     }
 
@@ -203,11 +221,14 @@ export default function EditJourneyPage() {
     });
   }, []);
 
-  const handleSetCategory = useCallback((photoId: string, categoryId: string) => {
-    setPhotos((prev) =>
-      prev.map((p) => (p.id === photoId ? { ...p, categoryId } : p))
-    );
-  }, []);
+  const handleSetCategory = useCallback(
+    (photoId: string, categoryId: string) => {
+      setPhotos((prev) =>
+        prev.map((p) => (p.id === photoId ? { ...p, categoryId } : p))
+      );
+    },
+    []
+  );
 
   const handleAddCategory = useCallback(() => {
     const name = newCategoryName.trim();
@@ -229,7 +250,9 @@ export default function EditJourneyPage() {
       }
       setCategories((prev) =>
         prev.map((c) =>
-          c.id === categoryId ? { ...c, name, updatedAt: new Date().toISOString() } : c
+          c.id === categoryId
+            ? { ...c, name, updatedAt: new Date().toISOString() }
+            : c
         )
       );
       setRenamingCategoryId(null);
@@ -242,7 +265,9 @@ export default function EditJourneyPage() {
       const cat = categories.find((c) => c.id === categoryId);
       if (!cat) return;
 
-      const photoCount = photos.filter((p) => p.categoryId === categoryId).length;
+      const photoCount = photos.filter(
+        (p) => p.categoryId === categoryId
+      ).length;
 
       if (photoCount > 0) {
         // Show confirmation modal
@@ -262,8 +287,9 @@ export default function EditJourneyPage() {
 
     // Find "Other" or first remaining category as fallback
     const other =
-      categories.find((c) => c.id === "default-other" && c.id !== category.id) ??
-      categories.find((c) => c.id !== category.id);
+      categories.find(
+        (c) => c.id === "default-other" && c.id !== category.id
+      ) ?? categories.find((c) => c.id !== category.id);
 
     const fallbackId = other?.id ?? "default-other";
 
@@ -271,7 +297,11 @@ export default function EditJourneyPage() {
     if (!other) {
       setCategories((prev) => [
         ...prev.filter((c) => c.id !== category.id),
-        { id: "default-other", name: "Other", createdAt: new Date().toISOString() },
+        {
+          id: "default-other",
+          name: "Other",
+          createdAt: new Date().toISOString(),
+        },
       ]);
     } else {
       setCategories((prev) => prev.filter((c) => c.id !== category.id));
@@ -289,8 +319,10 @@ export default function EditJourneyPage() {
 
   const filteredPhotos = useMemo(() => {
     if (activeFilter === "all") return photos;
-    if (activeFilter === "highlights") return photos.filter((p) => p.isHighlight);
-    if (activeFilter === "with-notes") return photos.filter((p) => p.hasNote);
+    if (activeFilter === "highlights")
+      return photos.filter((p) => p.isHighlight);
+    if (activeFilter === "with-notes")
+      return photos.filter((p) => p.hasNote);
     return photos.filter((p) => p.categoryId === activeFilter);
   }, [photos, activeFilter]);
 
@@ -355,7 +387,9 @@ export default function EditJourneyPage() {
     } catch {
       setDeleting(false);
       setDeleteModalOpen(false);
-      setStorageError("This journey could not be moved to Trash. Please try again.");
+      setStorageError(
+        "This journey could not be moved to Trash. Please try again."
+      );
     }
   }, [journey, router]);
 
@@ -364,6 +398,12 @@ export default function EditJourneyPage() {
     formData.location,
     formData.startDate
   );
+
+  // Derived data for panels
+  const coverPhoto = photos.find(
+    (p) => p.isCover || p.id === journey?.coverPhotoId
+  );
+  const highlightedPhotos = photos.filter((p) => p.isHighlight);
 
   if (!loaded) {
     return (
@@ -401,122 +441,69 @@ export default function EditJourneyPage() {
   return (
     <div className="min-h-screen">
       <TopNav />
-      <main className="mx-auto max-w-5xl px-page-mobile py-10 lg:px-page-desktop lg:py-14">
-        <h1 className="mb-10 text-[28px] font-semibold tracking-tight text-foreground lg:text-[34px]">
-          Edit Journey
-        </h1>
 
-        <div className="grid gap-10 lg:grid-cols-2">
-          {/* Left: Form */}
-          <div>
-            <h2 className="mb-5 text-[18px] font-semibold text-foreground">
-              Journey Info
-            </h2>
+      <main className="mx-auto max-w-3xl px-page-mobile py-10 lg:px-page-desktop lg:py-14">
+        {/* ═══════════════════════════════════════════
+            Header
+            ═══════════════════════════════════════════ */}
+        <EditJourneyHeader journeyId={id} />
+
+        {/* ═══════════════════════════════════════════
+            Section 1 — Basic Journey Information
+            ═══════════════════════════════════════════ */}
+        <section className="rounded-panel bg-white ring-1 ring-black/[0.04] px-6 py-6 lg:px-8 lg:py-8">
+          <h2 className="text-[20px] font-semibold text-foreground">
+            Journey Info
+          </h2>
+          <p className="mt-1 text-[14px] text-muted">
+            The basics that describe this journey.
+          </p>
+          <div className="mt-5">
             <JourneyForm initial={formData} onChange={setFormData} />
           </div>
+        </section>
 
-          {/* Right: Upload */}
-          <div>
-            <h2 className="mb-5 text-[18px] font-semibold text-foreground">
-              Photos
-            </h2>
+        {/* ═══════════════════════════════════════════
+            Section 2 — Cover Photo
+            ═══════════════════════════════════════════ */}
+        <div className="mt-8">
+          <CoverPhotoPanel
+            coverPhoto={coverPhoto}
+            hasPhotos={photos.length > 0}
+          />
+        </div>
+
+        {/* ═══════════════════════════════════════════
+            Section 3 — Highlights
+            ═══════════════════════════════════════════ */}
+        <div className="mt-8">
+          <HighlightsPreview highlights={highlightedPhotos} />
+        </div>
+
+        {/* ═══════════════════════════════════════════
+            Section 4 — Organize Photos
+            ═══════════════════════════════════════════ */}
+        <section className="mt-8 rounded-panel bg-white ring-1 ring-black/[0.04] px-6 py-6 lg:px-8 lg:py-8">
+          <h2 className="text-[20px] font-semibold text-foreground">
+            Organize Photos
+          </h2>
+          <p className="mt-1 text-[14px] text-muted">
+            Set a cover, choose highlights, add notes, and organize photos by
+            category.
+          </p>
+
+          {/* Upload */}
+          <div className="mt-5">
             <UploadDropzone onFilesSelected={handleFilesSelected} />
             {storageError && (
               <p className="mt-3 text-sm text-red-600" role="alert">
                 {storageError}
               </p>
             )}
+          </div>
 
-            {/* Category Management */}
-            <div className="mt-6">
-              <h3 className="mb-3 text-[15px] font-semibold text-foreground">
-                Categories
-              </h3>
-              <div className="flex flex-wrap items-center gap-2">
-                {categories.map((cat) => (
-                  <span
-                    key={cat.id}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-border bg-white px-3 py-1.5 text-[13px] text-foreground"
-                  >
-                    {renamingCategoryId === cat.id ? (
-                      <input
-                        value={renamingCategoryName}
-                        onChange={(e) => setRenamingCategoryName(e.target.value)}
-                        onBlur={() => handleRenameCategory(cat.id)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") handleRenameCategory(cat.id);
-                          if (e.key === "Escape") setRenamingCategoryId(null);
-                        }}
-                        className="w-24 rounded border border-border px-1.5 py-0.5 text-[13px] outline-none focus:border-accent"
-                        autoFocus
-                      />
-                    ) : (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setRenamingCategoryId(cat.id);
-                            setRenamingCategoryName(cat.name);
-                          }}
-                          className="hover:text-accent"
-                          title="Rename category"
-                        >
-                          {cat.name}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteCategory(cat.id)}
-                          className="ml-0.5 text-muted hover:text-red-500"
-                          title="Delete category"
-                        >
-                          ×
-                        </button>
-                      </>
-                    )}
-                  </span>
-                ))}
-
-                {addingCategory ? (
-                  <span className="inline-flex items-center gap-1 rounded-full border border-accent bg-white px-3 py-1.5">
-                    <input
-                      value={newCategoryName}
-                      onChange={(e) => setNewCategoryName(e.target.value)}
-                      onBlur={() => {
-                        if (!newCategoryName.trim()) setAddingCategory(false);
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") handleAddCategory();
-                        if (e.key === "Escape") {
-                          setAddingCategory(false);
-                          setNewCategoryName("");
-                        }
-                      }}
-                      placeholder="Category name"
-                      className="w-28 rounded border-0 px-0 py-0.5 text-[13px] outline-none"
-                      autoFocus
-                    />
-                    <button
-                      type="button"
-                      onClick={handleAddCategory}
-                      disabled={!newCategoryName.trim()}
-                      className="text-[13px] font-medium text-accent disabled:opacity-40"
-                    >
-                      Add
-                    </button>
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setAddingCategory(true)}
-                    className="inline-flex items-center gap-1 rounded-full border border-dashed border-muted px-3 py-1.5 text-[13px] text-muted hover:border-accent hover:text-accent"
-                  >
-                    + Add Category
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Category Filter + Photo grid */}
+          {/* Filter tabs + Photo grid */}
+          {photos.length > 0 && (
             <div className="mt-6">
               <div className="mb-4 overflow-x-auto pb-1">
                 <div className="inline-flex min-w-max rounded-xl bg-surface p-1">
@@ -569,11 +556,116 @@ export default function EditJourneyPage() {
                 </p>
               )}
             </div>
-          </div>
-        </div>
+          )}
 
-        {/* Save action */}
-        <div className="mt-12 border-t border-border pt-8">
+          {photos.length === 0 && (
+            <div className="mt-5 rounded-card bg-surface px-6 py-12 text-center">
+              <p className="text-[14px] text-muted">
+                No photos yet. Upload some above to start curating.
+              </p>
+            </div>
+          )}
+        </section>
+
+        {/* ═══════════════════════════════════════════
+            Section 5 — Categories
+            ═══════════════════════════════════════════ */}
+        <section className="mt-8 rounded-panel bg-white ring-1 ring-black/[0.04] px-6 py-6 lg:px-8 lg:py-8">
+          <h2 className="text-[20px] font-semibold text-foreground">
+            Categories
+          </h2>
+          <p className="mt-1 text-[14px] text-muted">
+            Customize how this journey&rsquo;s photos are organized.
+          </p>
+
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            {categories.map((cat) => (
+              <span
+                key={cat.id}
+                className="inline-flex items-center gap-1.5 rounded-full border border-border bg-white px-3 py-1.5 text-[13px] text-foreground"
+              >
+                {renamingCategoryId === cat.id ? (
+                  <input
+                    value={renamingCategoryName}
+                    onChange={(e) => setRenamingCategoryName(e.target.value)}
+                    onBlur={() => handleRenameCategory(cat.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleRenameCategory(cat.id);
+                      if (e.key === "Escape") setRenamingCategoryId(null);
+                    }}
+                    className="w-24 rounded border border-border px-1.5 py-0.5 text-[13px] outline-none focus:border-accent"
+                    autoFocus
+                  />
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRenamingCategoryId(cat.id);
+                        setRenamingCategoryName(cat.name);
+                      }}
+                      className="hover:text-accent"
+                      title="Rename category"
+                    >
+                      {cat.name}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteCategory(cat.id)}
+                      className="ml-0.5 text-muted hover:text-red-500"
+                      title="Delete category"
+                    >
+                      ×
+                    </button>
+                  </>
+                )}
+              </span>
+            ))}
+
+            {addingCategory ? (
+              <span className="inline-flex items-center gap-1 rounded-full border border-accent bg-white px-3 py-1.5">
+                <input
+                  value={newCategoryName}
+                  onChange={(e) => setNewCategoryName(e.target.value)}
+                  onBlur={() => {
+                    if (!newCategoryName.trim()) setAddingCategory(false);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleAddCategory();
+                    if (e.key === "Escape") {
+                      setAddingCategory(false);
+                      setNewCategoryName("");
+                    }
+                  }}
+                  placeholder="Category name"
+                  className="w-28 rounded border-0 px-0 py-0.5 text-[13px] outline-none"
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  onClick={handleAddCategory}
+                  disabled={!newCategoryName.trim()}
+                  className="text-[13px] font-medium text-accent disabled:opacity-40"
+                >
+                  Add
+                </button>
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setAddingCategory(true)}
+                className="inline-flex items-center gap-1 rounded-full border border-dashed border-muted px-3 py-1.5 text-[13px] text-muted hover:border-accent hover:text-accent"
+              >
+                + Add Category
+              </button>
+            )}
+          </div>
+        </section>
+
+        {/* ═══════════════════════════════════════════
+            Save action
+            ═══════════════════════════════════════════ */}
+        <div className="mt-10 border-t border-border pt-8">
           <div className="flex flex-col items-stretch gap-5 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
               <p className="text-[18px] font-semibold text-foreground">
@@ -605,7 +697,9 @@ export default function EditJourneyPage() {
           </div>
         </div>
 
-        {/* Delete Journey */}
+        {/* ═══════════════════════════════════════════
+            Danger Zone
+            ═══════════════════════════════════════════ */}
         <div className="mt-12 border-t border-border pt-8">
           <h2 className="mb-3 text-[15px] font-semibold text-muted uppercase tracking-wide">
             Danger Zone
