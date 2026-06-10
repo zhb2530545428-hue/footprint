@@ -4,11 +4,8 @@ import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import type { Journey } from "@/lib/types";
 import {
-  getTrashedJourneys,
-  permanentlyDeleteJourney,
-  restoreJourney,
-  revokeJourneyObjectUrls,
-} from "@/lib/storage";
+  getJourneyRepo,
+} from "@/lib/data/repositoryFactory";
 import { deriveTitle, formatDateRange } from "@/lib/utils";
 import TopNav from "@/components/TopNav";
 import ConfirmModal from "@/components/ConfirmModal";
@@ -28,7 +25,7 @@ export default function TrashPage() {
 
   const loadTrashed = useCallback(() => {
     let loadedJourneys: Journey[] = [];
-    void getTrashedJourneys()
+    void getJourneyRepo().getTrashedJourneys()
       .then((found) => {
         loadedJourneys = found;
         setTrashed(found);
@@ -37,7 +34,7 @@ export default function TrashPage() {
       .catch(() => setLoaded(true));
 
     return () => {
-      revokeJourneyObjectUrls(loadedJourneys);
+      getJourneyRepo().revokeObjectUrls(loadedJourneys);
     };
   }, []);
 
@@ -51,7 +48,7 @@ export default function TrashPage() {
       setRestoringId(id);
       setActionError("");
       try {
-        await restoreJourney(id);
+        await getJourneyRepo().restoreJourney(id);
         setTrashed((prev) => prev.filter((j) => j.id !== id));
       } catch {
         setActionError("Failed to restore this journey. Please try again.");
@@ -67,7 +64,7 @@ export default function TrashPage() {
     setPermDeleting(true);
     setActionError("");
     try {
-      await permanentlyDeleteJourney(permDeleteId);
+      await getJourneyRepo().permanentlyDeleteJourney(permDeleteId);
       setTrashed((prev) => prev.filter((j) => j.id !== permDeleteId));
       setPermDeleteId(null);
     } catch {
@@ -175,7 +172,7 @@ export default function TrashPage() {
       <ConfirmModal
         open={permDeleteId !== null}
         title="Delete Permanently"
-        message="This will permanently remove this journey and all its photos from your browser storage. This action cannot be undone."
+        message="This will permanently remove this journey and all its photos from local storage. This action cannot be undone."
         confirmLabel={permDeleting ? "Deleting…" : "Delete Permanently"}
         confirmVariant="danger"
         onConfirm={handlePermanentDelete}

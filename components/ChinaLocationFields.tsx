@@ -158,7 +158,9 @@ export default function ChinaLocationFields({
                 <span className={cities.length === 0 ? "text-muted" : ""}>
                   {cities.length === 0
                     ? "Select cities"
-                    : `${cities.length} city${cities.length > 1 ? "ies" : "y"} selected`}
+                    : cities.length === 1
+                      ? "1 city selected"
+                      : `${cities.length} cities selected`}
                 </span>
                 <svg
                   className={`h-4 w-4 text-muted transition-transform ${cityDropdownOpen ? "rotate-180" : ""}`}

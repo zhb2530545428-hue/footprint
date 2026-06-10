@@ -3,14 +3,19 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import type { Journey, JourneyPhoto } from "@/lib/types";
-import { revokePhotoObjectUrls, saveJourney, createDefaultCategories } from "@/lib/storage";
-import { deletePhotoBlobs, savePhotoBlob } from "@/lib/image-storage";
+import { createDefaultCategories } from "@/lib/storage";
+import { getJourneyRepo, getPhotoRepo } from "@/lib/data/repositoryFactory";
 import { generateId, deriveTitle } from "@/lib/utils";
 import TopNav from "@/components/TopNav";
 import JourneyForm from "@/components/JourneyForm";
 import type { JourneyFormData } from "@/components/JourneyForm";
 import UploadDropzone from "@/components/UploadDropzone";
 import PhotoGrid from "@/components/PhotoGrid";
+
+interface PendingFile {
+  id: string;
+  file: File;
+}
 
 export default function NewJourneyPage() {
   const router = useRouter();
@@ -28,6 +33,7 @@ export default function NewJourneyPage() {
   const [photos, setPhotos] = useState<JourneyPhoto[]>([]);
   const [archiving, setArchiving] = useState(false);
   const [storageError, setStorageError] = useState("");
+  const pendingFilesRef = useRef<PendingFile[]>([]);
   const photosRef = useRef<JourneyPhoto[]>([]);
   const archivedRef = useRef(false);
 
@@ -37,51 +43,48 @@ export default function NewJourneyPage() {
 
   useEffect(() => {
     return () => {
+      // Clean up temporary blob URLs and browser IndexedDB blobs on unmount
       const currentPhotos = photosRef.current;
-      revokePhotoObjectUrls(currentPhotos);
+      getPhotoRepo().revokeObjectUrls(currentPhotos);
       if (!archivedRef.current) {
-        void deletePhotoBlobs(
-          currentPhotos.flatMap((photo) => (photo.storageKey ? [photo.storageKey] : []))
-        );
+        void getPhotoRepo().deletePhotos(
+          currentPhotos.map((p) => p.id),
+          ""
+        ).catch(() => {});
       }
     };
   }, []);
 
-  const handleFilesSelected = useCallback(async (files: File[]) => {
+  const handleFilesSelected = useCallback((files: File[]) => {
     setStorageError("");
-    const prepared = files.map((file) => ({ file, id: generateId() }));
+    const prepared: PendingFile[] = files.map((file) => ({
+      file,
+      id: generateId(),
+    }));
 
-    try {
-      await Promise.all(
-        prepared.map(({ file, id }) => savePhotoBlob(id, file))
-      );
+    // Create temporary blob URLs for preview
+    const newPhotos: JourneyPhoto[] = prepared.map(({ file, id }) => ({
+      id,
+      url: URL.createObjectURL(file),
+      fileName: file.name,
+      isCover: false,
+      isHighlight: false,
+      categoryId: "default-other",
+      hasNote: false,
+      createdAt: new Date().toISOString(),
+    }));
 
-      const newPhotos: JourneyPhoto[] = prepared.map(({ file, id }) => ({
-        id,
-        storageKey: id,
-        url: URL.createObjectURL(file),
-        fileName: file.name,
-        isCover: false,
-        isHighlight: false,
-        categoryId: "default-other",
-        hasNote: false,
-        createdAt: new Date().toISOString(),
-      }));
+    pendingFilesRef.current = [...pendingFilesRef.current, ...prepared];
 
-      setPhotos((prev) => {
-        // Auto-set first photo as cover if none is set yet
-        const hasCover = prev.some((p) => p.isCover) || newPhotos.length === 0;
-        if (!hasCover && prev.length === 0) {
-          newPhotos[0].isCover = true;
-        }
-        const next = [...prev, ...newPhotos];
-        photosRef.current = next;
-        return next;
-      });
-    } catch {
-      await deletePhotoBlobs(prepared.map(({ id }) => id)).catch(() => undefined);
-      setStorageError("These photos could not be saved in this browser. Please try again.");
-    }
+    setPhotos((prev) => {
+      const hasCover = prev.some((p) => p.isCover) || newPhotos.length === 0;
+      if (!hasCover && prev.length === 0) {
+        newPhotos[0].isCover = true;
+      }
+      const next = [...prev, ...newPhotos];
+      photosRef.current = next;
+      return next;
+    });
   }, []);
 
   const handleSetCover = useCallback((id: string) => {
@@ -110,13 +113,11 @@ export default function NewJourneyPage() {
   }, []);
 
   const handleRemove = useCallback((id: string) => {
+    // Revoke blob URL for removed photo
     const removed = photosRef.current.find((photo) => photo.id === id);
-    if (removed) revokePhotoObjectUrls([removed]);
-    if (removed?.storageKey) {
-      void deletePhotoBlobs([removed.storageKey]).catch(() => {
-        setStorageError("The photo was removed, but its browser storage could not be cleaned up.");
-      });
-    }
+    if (removed) getPhotoRepo().revokeObjectUrls([removed]);
+    // Remove from pending files
+    pendingFilesRef.current = pendingFilesRef.current.filter((pf) => pf.id !== id);
     setPhotos((prev) => {
       const next = prev.filter((p) => p.id !== id);
       photosRef.current = next;
@@ -148,42 +149,77 @@ export default function NewJourneyPage() {
     }
 
     const now = new Date().toISOString();
-    const coverPhotoId = finalPhotos.find((p) => p.isCover)?.id;
+    const journeyId = generateId();
     const companions = formData.companions
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
 
     const title = formData.title.trim() || undefined;
-
-    const journey: Journey = {
-      id: generateId(),
-      title,
-      location: formData.location.trim(),
-      locationCountry: "China" as const,
-      locationProvince: formData.locationProvince,
-      locationCities: formData.locationCities,
-      locationCity: formData.locationCities[0] ?? "",
-      locationAddress: formData.locationAddress.trim() || undefined,
-      startDate: formData.startDate || undefined,
-      endDate: formData.endDate || undefined,
-      companions,
-      notes: formData.notes.trim() || undefined,
-      status: "archived",
-      coverPhotoId,
-      photos: finalPhotos,
-      categories: createDefaultCategories(now),
-      createdAt: now,
-      updatedAt: now,
-    };
+    let savedPhotos: JourneyPhoto[] = [];
 
     try {
-      await saveJourney(journey);
+      // Step 1: Save photo files via repo (IndexedDB in browser, Library folder in desktop)
+      const pendingFiles = pendingFilesRef.current;
+
+      if (pendingFiles.length > 0) {
+        const photoRepo = getPhotoRepo();
+        savedPhotos = await photoRepo.savePhotos(journeyId, pendingFiles);
+
+        // Merge user-set metadata (cover, highlight, note, category) from preview photos
+        const previewMap = new Map(finalPhotos.map((p) => [p.id, p]));
+        savedPhotos = savedPhotos.map((sp) => {
+          const preview = previewMap.get(sp.id);
+          if (!preview) return sp;
+          return {
+            ...sp,
+            isCover: preview.isCover,
+            isHighlight: preview.isHighlight,
+            note: preview.note,
+            hasNote: preview.hasNote,
+            categoryId: preview.categoryId,
+          };
+        });
+      }
+
+      const coverPhotoId = savedPhotos.find((p) => p.isCover)?.id;
+
+      const journey: Journey = {
+        id: journeyId,
+        title,
+        location: formData.location.trim(),
+        locationCountry: "China" as const,
+        locationProvince: formData.locationProvince,
+        locationCities: formData.locationCities,
+        locationCity: formData.locationCities[0] ?? "",
+        locationAddress: formData.locationAddress.trim() || undefined,
+        startDate: formData.startDate || undefined,
+        endDate: formData.endDate || undefined,
+        companions,
+        notes: formData.notes.trim() || undefined,
+        status: "archived",
+        coverPhotoId,
+        photos: savedPhotos,
+        categories: createDefaultCategories(now),
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      // Step 2: Save journey via repo (localStorage in browser, SQLite in desktop)
+      await getJourneyRepo().saveJourney(journey);
+      getPhotoRepo().revokeObjectUrls(finalPhotos);
       archivedRef.current = true;
       router.push(`/journeys/${journey.id}`);
-    } catch {
+    } catch (err) {
+      if (savedPhotos.length > 0) {
+        const photoRepo = getPhotoRepo();
+        await photoRepo
+          .deletePhotos(savedPhotos.map((photo) => photo.id), journeyId)
+          .catch(() => {});
+        await photoRepo.deleteAllPhotosForJourney(journeyId).catch(() => {});
+      }
       setArchiving(false);
-      setStorageError("This journey could not be archived. Please try again.");
+      setStorageError(`Archive failed: ${err}`);
     }
   }, [canArchive, photos, formData, router]);
 

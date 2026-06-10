@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import type { Journey } from "@/lib/types";
-import { getJourney, revokePhotoObjectUrls } from "@/lib/storage";
+import { getJourneyRepo, getPhotoRepo } from "@/lib/data/repositoryFactory";
 import { deriveTitle, formatDateRange } from "@/lib/utils";
 import TopNav from "@/components/TopNav";
 import SegmentedTabs from "@/components/SegmentedTabs";
@@ -25,11 +25,11 @@ export default function JourneyDetailPage() {
     let cancelled = false;
     let loadedJourney: Journey | undefined;
 
-    void getJourney(id)
+    void getJourneyRepo().getJourney(id)
       .then((found) => {
         loadedJourney = found;
         if (cancelled) {
-          if (found) revokePhotoObjectUrls(found.photos);
+          if (found) getPhotoRepo().revokeObjectUrls(found.photos);
           return;
         }
         setJourney(found ?? null);
@@ -41,7 +41,7 @@ export default function JourneyDetailPage() {
 
     return () => {
       cancelled = true;
-      if (loadedJourney) revokePhotoObjectUrls(loadedJourney.photos);
+      if (loadedJourney) getPhotoRepo().revokeObjectUrls(loadedJourney.photos);
     };
   }, [id]);
 

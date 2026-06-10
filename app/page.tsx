@@ -1,15 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import type { Journey } from "@/lib/types";
 import type { FootprintSettings } from "@/lib/settings";
-import { getSettings } from "@/lib/settings";
+import { getSettingsRepo } from "@/lib/data/repositoryFactory";
 import {
-  getJourneys,
-  revokeJourneyObjectUrls,
-  setJourneys,
-} from "@/lib/storage";
+  getJourneyRepo,
+  getDataMode,
+} from "@/lib/data/repositoryFactory";
 import { MOCK_JOURNEYS } from "@/lib/mock-data";
 import {
   sortJourneysNewestFirst,
@@ -37,7 +35,7 @@ const BROWSE_TABS = [
 
 export default function HomePage() {
   const [archived, setArchived] = useState<Journey[]>([]);
-  const [settings, setSettings] = useState<FootprintSettings>(getSettings);
+  const [settings, setSettings] = useState<FootprintSettings>(() => getSettingsRepo().getSettings());
   const [loaded, setLoaded] = useState(false);
   const [mode, setMode] = useState<BrowseMode>("recent");
   const [searchQuery, setSearchQuery] = useState("");
@@ -47,22 +45,26 @@ export default function HomePage() {
     let loadedJourneys: Journey[] = [];
 
     const loadJourneys = async () => {
-      let journeys = await getJourneys();
+      let journeys = await getJourneyRepo().getJourneys();
 
       // Only seed mock data once on first visit
-      if (journeys.length === 0 && !localStorage.getItem(SEEDED_KEY)) {
+      if (
+        getDataMode() === "browser" &&
+        journeys.length === 0 &&
+        !localStorage.getItem(SEEDED_KEY)
+      ) {
         journeys = MOCK_JOURNEYS;
-        await setJourneys(journeys);
+        await getJourneyRepo().setJourneys(journeys);
         localStorage.setItem(SEEDED_KEY, "true");
       }
 
       loadedJourneys = journeys;
       if (cancelled) {
-        revokeJourneyObjectUrls(journeys);
+        getJourneyRepo().revokeObjectUrls(journeys);
         return;
       }
 
-      setSettings(getSettings());
+      setSettings(getSettingsRepo().getSettings());
       setArchived(
         sortJourneysNewestFirst(
           journeys.filter((j) => j.status === "archived")
@@ -77,7 +79,7 @@ export default function HomePage() {
 
     return () => {
       cancelled = true;
-      revokeJourneyObjectUrls(loadedJourneys);
+      getJourneyRepo().revokeObjectUrls(loadedJourneys);
     };
   }, []);
 
@@ -120,7 +122,7 @@ export default function HomePage() {
       <main className="mx-auto max-w-7xl px-page-mobile py-10 lg:px-page-desktop lg:py-14">
         {/* Memory Library Header */}
         <section className="mb-8">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div>
             <div>
               <h1 className="text-[28px] font-semibold tracking-tight text-foreground lg:text-[34px]">
                 Your memories
@@ -129,12 +131,6 @@ export default function HomePage() {
                 A calm archive for the journeys you want to remember.
               </p>
             </div>
-            <Link
-              href="/journeys/new"
-              className="shrink-0 rounded-button bg-foreground px-5 py-2.5 text-sm font-medium text-white transition hover:bg-foreground/85"
-            >
-              + New Journey
-            </Link>
           </div>
         </section>
 

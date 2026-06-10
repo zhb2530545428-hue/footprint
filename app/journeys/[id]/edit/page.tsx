@@ -3,14 +3,8 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import type { Journey, JourneyPhoto, PhotoCategory } from "@/lib/types";
-import {
-  getJourney,
-  moveJourneyToTrash,
-  revokePhotoObjectUrls,
-  updateJourney,
-  createDefaultCategories,
-} from "@/lib/storage";
-import { deletePhotoBlobs, savePhotoBlob } from "@/lib/image-storage";
+import { createDefaultCategories } from "@/lib/storage";
+import { getJourneyRepo, getPhotoRepo } from "@/lib/data/repositoryFactory";
 import { generateId, deriveTitle } from "@/lib/utils";
 import TopNav from "@/components/TopNav";
 import JourneyForm from "@/components/JourneyForm";
@@ -21,6 +15,11 @@ import ConfirmModal from "@/components/ConfirmModal";
 import EditJourneyHeader from "@/components/EditJourneyHeader";
 import CoverPhotoPanel from "@/components/CoverPhotoPanel";
 import HighlightsPreview from "@/components/HighlightsPreview";
+
+interface PendingFile {
+  id: string;
+  file: File;
+}
 
 export default function EditJourneyPage() {
   const params = useParams();
@@ -46,8 +45,7 @@ export default function EditJourneyPage() {
   const [saving, setSaving] = useState(false);
   const [storageError, setStorageError] = useState("");
   const photosRef = useRef<JourneyPhoto[]>([]);
-  const originalStorageKeysRef = useRef(new Set<string>());
-  const savedRef = useRef(false);
+  const pendingFilesRef = useRef<PendingFile[]>([]);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -70,10 +68,10 @@ export default function EditJourneyPage() {
   useEffect(() => {
     let cancelled = false;
 
-    void getJourney(id)
+    void getJourneyRepo().getJourney(id)
       .then((found) => {
         if (cancelled) {
-          if (found) revokePhotoObjectUrls(found.photos);
+          if (found) getPhotoRepo().revokeObjectUrls(found.photos);
           return;
         }
         if (!found) {
@@ -81,11 +79,6 @@ export default function EditJourneyPage() {
           return;
         }
 
-        originalStorageKeysRef.current = new Set(
-          found.photos.flatMap((photo) =>
-            photo.storageKey ? [photo.storageKey] : []
-          )
-        );
         photosRef.current = found.photos;
         setJourney(found);
         setCategories(found.categories ?? createDefaultCategories());
@@ -114,7 +107,7 @@ export default function EditJourneyPage() {
       .catch(() => {
         if (!cancelled) {
           setStorageError(
-            "This journey could not be loaded from browser storage."
+            "This journey could not be loaded from storage."
           );
           setLoaded(true);
         }
@@ -122,60 +115,37 @@ export default function EditJourneyPage() {
 
     return () => {
       cancelled = true;
-      const currentPhotos = photosRef.current;
-      revokePhotoObjectUrls(currentPhotos);
-      if (!savedRef.current) {
-        void deletePhotoBlobs(
-          currentPhotos.flatMap((photo) =>
-            photo.storageKey &&
-            !originalStorageKeysRef.current.has(photo.storageKey)
-              ? [photo.storageKey]
-              : []
-          )
-        );
-      }
+      getPhotoRepo().revokeObjectUrls(photosRef.current);
     };
   }, [id]);
 
-  const handleFilesSelected = useCallback(async (files: File[]) => {
+  const handleFilesSelected = useCallback((files: File[]) => {
     setStorageError("");
-    const prepared = files.map((file) => ({ file, id: generateId() }));
+    const prepared: PendingFile[] = files.map((file) => ({
+      file,
+      id: generateId(),
+    }));
+    const newPhotos: JourneyPhoto[] = prepared.map(({ file, id }) => ({
+      id,
+      url: URL.createObjectURL(file),
+      fileName: file.name,
+      isCover: false,
+      isHighlight: false,
+      categoryId: "default-other",
+      hasNote: false,
+      createdAt: new Date().toISOString(),
+    }));
 
-    try {
-      await Promise.all(
-        prepared.map(({ file, id }) => savePhotoBlob(id, file))
-      );
-
-      const newPhotos: JourneyPhoto[] = prepared.map(({ file, id }) => ({
-        id,
-        storageKey: id,
-        url: URL.createObjectURL(file),
-        fileName: file.name,
-        isCover: false,
-        isHighlight: false,
-        categoryId: "default-other",
-        hasNote: false,
-        createdAt: new Date().toISOString(),
-      }));
-
-      setPhotos((prev) => {
-        // Auto-set first photo as cover if none is set yet
-        const hasCover = prev.some((p) => p.isCover) || newPhotos.length === 0;
-        if (!hasCover && prev.length === 0) {
-          newPhotos[0].isCover = true;
-        }
-        const next = [...prev, ...newPhotos];
-        photosRef.current = next;
-        return next;
-      });
-    } catch {
-      await deletePhotoBlobs(prepared.map(({ id }) => id)).catch(
-        () => undefined
-      );
-      setStorageError(
-        "These photos could not be saved in this browser. Please try again."
-      );
-    }
+    pendingFilesRef.current = [...pendingFilesRef.current, ...prepared];
+    setPhotos((prev) => {
+      const hasCover = prev.some((p) => p.isCover) || newPhotos.length === 0;
+      if (!hasCover && prev.length === 0) {
+        newPhotos[0].isCover = true;
+      }
+      const next = [...prev, ...newPhotos];
+      photosRef.current = next;
+      return next;
+    });
   }, []);
 
   const handleSetCover = useCallback((photoId: string) => {
@@ -207,17 +177,10 @@ export default function EditJourneyPage() {
 
   const handleRemove = useCallback((photoId: string) => {
     const removed = photosRef.current.find((photo) => photo.id === photoId);
-    if (removed) revokePhotoObjectUrls([removed]);
-    if (
-      removed?.storageKey &&
-      !originalStorageKeysRef.current.has(removed.storageKey)
-    ) {
-      void deletePhotoBlobs([removed.storageKey]).catch(() => {
-        setStorageError(
-          "The photo was removed, but its browser storage could not be cleaned up."
-        );
-      });
-    }
+    if (removed) getPhotoRepo().revokeObjectUrls([removed]);
+    pendingFilesRef.current = pendingFilesRef.current.filter(
+      (pending) => pending.id !== photoId
+    );
 
     setPhotos((prev) => {
       // Reassign cover if the removed photo was the cover
@@ -372,35 +335,54 @@ export default function EditJourneyPage() {
 
     const title = formData.title.trim() || undefined;
 
-    const updated: Journey = {
-      ...journey,
-      title,
-      location: formData.location.trim(),
-      locationCountry: formData.locationProvince
-        ? ("China" as const)
-        : undefined,
-      locationProvince: formData.locationProvince || undefined,
-      locationCities:
-        formData.locationCities.length > 0
-          ? formData.locationCities
-          : undefined,
-      locationCity:
-        formData.locationCities.length > 0
-          ? formData.locationCities[0]
-          : undefined,
-      locationAddress: formData.locationAddress.trim() || undefined,
-      startDate: formData.startDate || undefined,
-      endDate: formData.endDate || undefined,
-      companions,
-      notes: formData.notes.trim() || undefined,
-      coverPhotoId,
-      photos: finalPhotos,
-      categories,
-    };
-
     try {
-      await updateJourney(updated);
-      savedRef.current = true;
+      const pendingFiles = pendingFilesRef.current;
+      if (pendingFiles.length > 0) {
+        const savedPhotos = await getPhotoRepo().savePhotos(journey.id, pendingFiles);
+        const savedMap = new Map(savedPhotos.map((photo) => [photo.id, photo]));
+        finalPhotos = finalPhotos.map((photo) => {
+          const saved = savedMap.get(photo.id);
+          return saved
+            ? {
+                ...saved,
+                isCover: photo.isCover,
+                isHighlight: photo.isHighlight,
+                note: photo.note,
+                hasNote: photo.hasNote,
+                categoryId: photo.categoryId,
+              }
+            : photo;
+        });
+      }
+
+      const updated: Journey = {
+        ...journey,
+        title,
+        location: formData.location.trim(),
+        locationCountry: formData.locationProvince
+          ? ("China" as const)
+          : undefined,
+        locationProvince: formData.locationProvince || undefined,
+        locationCities:
+          formData.locationCities.length > 0
+            ? formData.locationCities
+            : undefined,
+        locationCity:
+          formData.locationCities.length > 0
+            ? formData.locationCities[0]
+            : undefined,
+        locationAddress: formData.locationAddress.trim() || undefined,
+        startDate: formData.startDate || undefined,
+        endDate: formData.endDate || undefined,
+        companions,
+        notes: formData.notes.trim() || undefined,
+        coverPhotoId,
+        photos: finalPhotos,
+        categories,
+      };
+
+      await getJourneyRepo().updateJourney(updated);
+      pendingFilesRef.current = [];
       router.push(`/journeys/${journey.id}`);
     } catch {
       setSaving(false);
@@ -412,8 +394,7 @@ export default function EditJourneyPage() {
     if (!journey) return;
     setDeleting(true);
     try {
-      await moveJourneyToTrash(journey.id);
-      savedRef.current = true;
+      await getJourneyRepo().moveJourneyToTrash(journey.id);
       router.push("/");
     } catch {
       setDeleting(false);
