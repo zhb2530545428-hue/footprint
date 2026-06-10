@@ -1,10 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
+import ChinaLocationFields from "@/components/ChinaLocationFields";
+import type { ChinaLocationData } from "@/components/ChinaLocationFields";
+import { formatJourneyLocation } from "@/lib/utils";
 
 interface JourneyFormData {
   title: string;
   location: string;
+  locationProvince: string;
+  locationCities: string[];
+  locationAddress: string;
   startDate: string;
   endDate: string;
   companions: string;
@@ -17,20 +23,163 @@ interface JourneyFormProps {
 }
 
 export default function JourneyForm({ initial, onChange }: JourneyFormProps) {
-  const [form, setForm] = useState<JourneyFormData>({
-    title: initial?.title ?? "",
-    location: initial?.location ?? "",
-    startDate: initial?.startDate ?? "",
-    endDate: initial?.endDate ?? "",
-    companions: initial?.companions ?? "",
-    notes: initial?.notes ?? "",
-  });
+  const [title, setTitle] = useState(initial?.title ?? "");
+  const [startDate, setStartDate] = useState(initial?.startDate ?? "");
+  const [endDate, setEndDate] = useState(initial?.endDate ?? "");
+  const [companions, setCompanions] = useState(initial?.companions ?? "");
+  const [notes, setNotes] = useState(initial?.notes ?? "");
 
-  const update = (field: keyof JourneyFormData, value: string) => {
-    const next = { ...form, [field]: value };
-    setForm(next);
-    onChange(next);
-  };
+  // Location structured state
+  const [locationProvince, setLocationProvince] = useState(
+    initial?.locationProvince ?? ""
+  );
+  const [locationCities, setLocationCities] = useState<string[]>(
+    initial?.locationCities ?? []
+  );
+  const [locationAddress, setLocationAddress] = useState(
+    initial?.locationAddress ?? ""
+  );
+
+  const oldLocationFallback = !initial?.locationProvince
+    ? initial?.location
+    : undefined;
+
+  const buildAndEmit = useCallback(
+    (
+      titleVal: string,
+      province: string,
+      cities: string[],
+      address: string,
+      start: string,
+      end: string,
+      comps: string,
+      n: string
+    ) => {
+      const displayLocation = formatJourneyLocation({
+        province,
+        cities,
+        address,
+        fallback: oldLocationFallback,
+      });
+
+      onChange({
+        title: titleVal,
+        location: displayLocation,
+        locationProvince: province,
+        locationCities: cities,
+        locationAddress: address,
+        startDate: start,
+        endDate: end,
+        companions: comps,
+        notes: n,
+      });
+    },
+    [onChange, oldLocationFallback]
+  );
+
+  const handleLocationChange = useCallback(
+    (data: ChinaLocationData) => {
+      setLocationProvince(data.province);
+      setLocationCities(data.cities);
+      setLocationAddress(data.address);
+      buildAndEmit(
+        title,
+        data.province,
+        data.cities,
+        data.address,
+        startDate,
+        endDate,
+        companions,
+        notes
+      );
+    },
+    [title, startDate, endDate, companions, notes, buildAndEmit]
+  );
+
+  const handleTitleChange = useCallback(
+    (val: string) => {
+      setTitle(val);
+      buildAndEmit(
+        val,
+        locationProvince,
+        locationCities,
+        locationAddress,
+        startDate,
+        endDate,
+        companions,
+        notes
+      );
+    },
+    [locationProvince, locationCities, locationAddress, startDate, endDate, companions, notes, buildAndEmit]
+  );
+
+  const handleStartDateChange = useCallback(
+    (val: string) => {
+      setStartDate(val);
+      buildAndEmit(
+        title,
+        locationProvince,
+        locationCities,
+        locationAddress,
+        val,
+        endDate,
+        companions,
+        notes
+      );
+    },
+    [title, locationProvince, locationCities, locationAddress, endDate, companions, notes, buildAndEmit]
+  );
+
+  const handleEndDateChange = useCallback(
+    (val: string) => {
+      setEndDate(val);
+      buildAndEmit(
+        title,
+        locationProvince,
+        locationCities,
+        locationAddress,
+        startDate,
+        val,
+        companions,
+        notes
+      );
+    },
+    [title, locationProvince, locationCities, locationAddress, startDate, companions, notes, buildAndEmit]
+  );
+
+  const handleCompanionsChange = useCallback(
+    (val: string) => {
+      setCompanions(val);
+      buildAndEmit(
+        title,
+        locationProvince,
+        locationCities,
+        locationAddress,
+        startDate,
+        endDate,
+        val,
+        notes
+      );
+    },
+    [title, locationProvince, locationCities, locationAddress, startDate, endDate, notes, buildAndEmit]
+  );
+
+  const handleNotesChange = useCallback(
+    (val: string) => {
+      setNotes(val);
+      buildAndEmit(
+        title,
+        locationProvince,
+        locationCities,
+        locationAddress,
+        startDate,
+        endDate,
+        companions,
+        val
+      );
+    },
+    [title, locationProvince, locationCities, locationAddress, startDate, endDate, companions, buildAndEmit]
+  );
 
   const inputClass =
     "w-full rounded-xl border border-border bg-white px-4 py-3 text-[15px] text-foreground placeholder:text-muted outline-none transition focus:border-foreground/30";
@@ -44,8 +193,8 @@ export default function JourneyForm({ initial, onChange }: JourneyFormProps) {
         <input
           type="text"
           placeholder="e.g. Kyoto Autumn Leaves"
-          value={form.title}
-          onChange={(e) => update("title", e.target.value)}
+          value={title}
+          onChange={(e) => handleTitleChange(e.target.value)}
           className={inputClass}
         />
         <p className="mt-1 text-[13px] text-muted">
@@ -53,19 +202,16 @@ export default function JourneyForm({ initial, onChange }: JourneyFormProps) {
         </p>
       </div>
 
-      <div>
-        <label className="mb-1.5 block text-[14px] font-medium text-foreground">
-          Location <span className="text-accent">*</span>
-        </label>
-        <input
-          type="text"
-          placeholder="e.g. Kyoto, Japan"
-          value={form.location}
-          onChange={(e) => update("location", e.target.value)}
-          className={inputClass}
-          required
-        />
-      </div>
+      {/* Structured China location fields */}
+      <ChinaLocationFields
+        initial={{
+          province: locationProvince,
+          cities: locationCities,
+          address: locationAddress,
+        }}
+        oldLocationFallback={oldLocationFallback}
+        onChange={handleLocationChange}
+      />
 
       <div className="grid grid-cols-2 gap-4">
         <div>
@@ -74,8 +220,8 @@ export default function JourneyForm({ initial, onChange }: JourneyFormProps) {
           </label>
           <input
             type="date"
-            value={form.startDate}
-            onChange={(e) => update("startDate", e.target.value)}
+            value={startDate}
+            onChange={(e) => handleStartDateChange(e.target.value)}
             className={inputClass}
           />
         </div>
@@ -85,8 +231,8 @@ export default function JourneyForm({ initial, onChange }: JourneyFormProps) {
           </label>
           <input
             type="date"
-            value={form.endDate}
-            onChange={(e) => update("endDate", e.target.value)}
+            value={endDate}
+            onChange={(e) => handleEndDateChange(e.target.value)}
             className={inputClass}
           />
         </div>
@@ -99,8 +245,8 @@ export default function JourneyForm({ initial, onChange }: JourneyFormProps) {
         <input
           type="text"
           placeholder="e.g. Alex, Sam (comma separated)"
-          value={form.companions}
-          onChange={(e) => update("companions", e.target.value)}
+          value={companions}
+          onChange={(e) => handleCompanionsChange(e.target.value)}
           className={inputClass}
         />
       </div>
@@ -111,8 +257,8 @@ export default function JourneyForm({ initial, onChange }: JourneyFormProps) {
         </label>
         <textarea
           placeholder="What made this trip special?"
-          value={form.notes}
-          onChange={(e) => update("notes", e.target.value)}
+          value={notes}
+          onChange={(e) => handleNotesChange(e.target.value)}
           rows={3}
           className={inputClass + " resize-none"}
         />

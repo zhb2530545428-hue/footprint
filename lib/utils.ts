@@ -46,6 +46,32 @@ export function formatDateRange(start?: string, end?: string): string {
   return `${sMonth} ${sDay}, ${s.getFullYear()} – ${eMonth} ${eDay}, ${e.getFullYear()}`;
 }
 
+/** Format structured China location fields into a display string like "浙江 · 杭州 / 湖州 · 西湖区" */
+export function formatJourneyLocation(input: {
+  province?: string;
+  cities?: string[];
+  city?: string;
+  address?: string;
+  fallback?: string;
+}): string {
+  const cityNames = input.cities?.length
+    ? input.cities
+    : input.city
+      ? [input.city]
+      : [];
+
+  const cityText = cityNames
+    .map((city) => city.trim())
+    .filter(Boolean)
+    .join(" / ");
+
+  const parts = [input.province, cityText, input.address]
+    .map((part) => part?.trim())
+    .filter(Boolean);
+
+  return parts.length > 0 ? parts.join(" · ") : input.fallback?.trim() ?? "";
+}
+
 /** Derive a display title: prefer explicit title, else location + year */
 export function deriveTitle(title?: string, location?: string, startDate?: string): string {
   if (title?.trim()) return title.trim();

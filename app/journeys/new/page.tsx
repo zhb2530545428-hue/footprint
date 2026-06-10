@@ -17,6 +17,9 @@ export default function NewJourneyPage() {
   const [formData, setFormData] = useState<JourneyFormData>({
     title: "",
     location: "",
+    locationProvince: "",
+    locationCities: [],
+    locationAddress: "",
     startDate: "",
     endDate: "",
     companions: "",
@@ -122,7 +125,9 @@ export default function NewJourneyPage() {
   }, []);
 
   const canArchive =
-    formData.location.trim().length > 0 && !archiving;
+    formData.locationProvince.length > 0 &&
+    formData.locationCities.length > 0 &&
+    !archiving;
 
   const handleArchive = useCallback(async () => {
     if (!canArchive) return;
@@ -155,6 +160,11 @@ export default function NewJourneyPage() {
       id: generateId(),
       title,
       location: formData.location.trim(),
+      locationCountry: "China" as const,
+      locationProvince: formData.locationProvince,
+      locationCities: formData.locationCities,
+      locationCity: formData.locationCities[0] ?? "",
+      locationAddress: formData.locationAddress.trim() || undefined,
       startDate: formData.startDate || undefined,
       endDate: formData.endDate || undefined,
       companions,
@@ -239,7 +249,7 @@ export default function NewJourneyPage() {
                 {" · "}
                 {formData.location
                   ? formData.location
-                  : "Add a location to archive"}
+                  : "Select a province and at least one city to archive"}
               </p>
             </div>
             <button

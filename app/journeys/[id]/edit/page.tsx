@@ -32,6 +32,9 @@ export default function EditJourneyPage() {
   const [formData, setFormData] = useState<JourneyFormData>({
     title: "",
     location: "",
+    locationProvince: "",
+    locationCities: [],
+    locationAddress: "",
     startDate: "",
     endDate: "",
     companions: "",
@@ -86,9 +89,20 @@ export default function EditJourneyPage() {
         photosRef.current = found.photos;
         setJourney(found);
         setCategories(found.categories ?? createDefaultCategories());
+
+        // Derive city list: prefer locationCities, then locationCity as single entry, then empty
+        const existingCities = found.locationCities?.length
+          ? found.locationCities
+          : found.locationCity
+            ? [found.locationCity]
+            : [];
+
         setFormData({
           title: found.title ?? "",
           location: found.location,
+          locationProvince: found.locationProvince ?? "",
+          locationCities: existingCities,
+          locationAddress: found.locationAddress ?? "",
           startDate: found.startDate ?? "",
           endDate: found.endDate ?? "",
           companions: found.companions.join(", "),
@@ -326,7 +340,11 @@ export default function EditJourneyPage() {
     return photos.filter((p) => p.categoryId === activeFilter);
   }, [photos, activeFilter]);
 
-  const canSave = formData.location.trim().length > 0 && !saving;
+  const canSave =
+    !saving &&
+    (formData.locationProvince.length > 0
+      ? formData.locationCities.length > 0
+      : formData.location.trim().length > 0);
 
   const handleSave = useCallback(async () => {
     if (!canSave || !journey) return;
@@ -358,6 +376,19 @@ export default function EditJourneyPage() {
       ...journey,
       title,
       location: formData.location.trim(),
+      locationCountry: formData.locationProvince
+        ? ("China" as const)
+        : undefined,
+      locationProvince: formData.locationProvince || undefined,
+      locationCities:
+        formData.locationCities.length > 0
+          ? formData.locationCities
+          : undefined,
+      locationCity:
+        formData.locationCities.length > 0
+          ? formData.locationCities[0]
+          : undefined,
+      locationAddress: formData.locationAddress.trim() || undefined,
       startDate: formData.startDate || undefined,
       endDate: formData.endDate || undefined,
       companions,
@@ -676,7 +707,7 @@ export default function EditJourneyPage() {
                   ? `${photos.length} photo${photos.length > 1 ? "s" : ""}`
                   : "No photos yet"}
                 {" · "}
-                {formData.location || "Add a location to save"}
+                {formData.location || "Select a province and at least one city to save"}
               </p>
             </div>
             <div className="flex gap-3">

@@ -24,6 +24,11 @@ export interface Journey {
   id: string;
   title?: string;
   location: string;
+  locationCountry?: "China";
+  locationProvince?: string;
+  locationCities?: string[];
+  locationCity?: string;
+  locationAddress?: string;
   startDate?: string;
   endDate?: string;
   companions: string[];
