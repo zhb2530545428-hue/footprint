@@ -290,6 +290,7 @@ export default function EditJourneyPage() {
   const filteredPhotos = useMemo(() => {
     if (activeFilter === "all") return photos;
     if (activeFilter === "highlights") return photos.filter((p) => p.isHighlight);
+    if (activeFilter === "with-notes") return photos.filter((p) => p.hasNote);
     return photos.filter((p) => p.categoryId === activeFilter);
   }, [photos, activeFilter]);
 
@@ -525,6 +526,14 @@ export default function EditJourneyPage() {
                       key: "highlights",
                       label: `Highlights (${photos.filter((p) => p.isHighlight).length})`,
                     },
+                    ...(photos.filter((p) => p.hasNote).length > 0
+                      ? [
+                          {
+                            key: "with-notes" as const,
+                            label: `With Notes (${photos.filter((p) => p.hasNote).length})`,
+                          },
+                        ]
+                      : []),
                     ...categories.map((c) => ({
                       key: c.id,
                       label: `${c.name} (${photos.filter((p) => p.categoryId === c.id).length})`,

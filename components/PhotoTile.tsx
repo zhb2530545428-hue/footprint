@@ -53,7 +53,10 @@ export default function PhotoTile({
 
       {/* Orange note dot */}
       {photo.hasNote && (
-        <div className="absolute right-2 top-2 z-10 h-2 w-2 rounded-full bg-accent" title={photo.note} />
+        <div
+          className="absolute right-2 top-2 z-10 h-2.5 w-2.5 rounded-full bg-accent ring-1 ring-white/60"
+          title={photo.note}
+        />
       )}
 
       {/* Cover badge */}

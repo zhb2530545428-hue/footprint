@@ -95,12 +95,20 @@ export default function PhotoLightbox({
 
       {/* Note below photo */}
       {photo.note && (
-        <p
-          className="mt-4 w-full max-w-lg px-6 text-center text-sm text-white/70 leading-relaxed"
+        <div
+          className="mt-5 w-full max-w-lg px-6"
           onClick={(e) => e.stopPropagation()}
         >
-          {photo.note}
-        </p>
+          <div className="flex items-center justify-center gap-2 mb-2">
+            <span className="h-1.5 w-1.5 rounded-full bg-accent" />
+            <span className="text-[11px] font-medium uppercase tracking-wider text-white/40">
+              Memory Note
+            </span>
+          </div>
+          <p className="text-center text-[15px] text-white/85 leading-relaxed">
+            {photo.note}
+          </p>
+        </div>
       )}
     </div>
   );

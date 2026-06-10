@@ -8,6 +8,7 @@ import { deriveTitle, formatDateRange } from "@/lib/utils";
 import TopNav from "@/components/TopNav";
 import SegmentedTabs from "@/components/SegmentedTabs";
 import PhotoLightbox from "@/components/PhotoLightbox";
+import NoteTooltip from "@/components/NoteTooltip";
 
 export default function JourneyDetailPage() {
   const params = useParams();
@@ -47,6 +48,7 @@ export default function JourneyDetailPage() {
     if (!journey) return [];
     if (activeTab === "all") return journey.photos;
     if (activeTab === "highlights") return journey.photos.filter((p) => p.isHighlight);
+    if (activeTab === "with-notes") return journey.photos.filter((p) => p.hasNote);
     return journey.photos.filter((p) => p.categoryId === activeTab);
   }, [journey, activeTab]);
 
@@ -178,28 +180,37 @@ export default function JourneyDetailPage() {
               Highlights
             </h2>
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-              {highlights.map((photo) => (
-                <button
-                  key={photo.id}
-                  onClick={() => {
-                    setActiveTab("all");
-                    const idx = journey.photos.findIndex(
-                      (p) => p.id === photo.id
-                    );
-                    setLightboxIndex(idx >= 0 ? idx : 0);
-                  }}
-                  className="group relative overflow-hidden rounded-card bg-surface"
-                >
-                  <img
-                    src={photo.url}
-                    alt={photo.fileName ?? "Highlight"}
-                    className="aspect-[4/3] w-full object-cover transition group-hover:scale-[1.02]"
-                  />
-                  {photo.hasNote && (
-                    <div className="absolute right-2 top-2 h-2 w-2 rounded-full bg-accent" />
-                  )}
-                </button>
-              ))}
+              {highlights.map((photo) => {
+                const btn = (
+                  <button
+                    key={photo.id}
+                    onClick={() => {
+                      setActiveTab("all");
+                      const idx = journey.photos.findIndex(
+                        (p) => p.id === photo.id
+                      );
+                      setLightboxIndex(idx >= 0 ? idx : 0);
+                    }}
+                    className="group relative overflow-hidden rounded-card bg-surface w-full text-left"
+                  >
+                    <img
+                      src={photo.url}
+                      alt={photo.fileName ?? "Highlight"}
+                      className="aspect-[4/3] w-full object-cover transition group-hover:scale-[1.02]"
+                    />
+                    {photo.hasNote && (
+                      <div className="absolute right-2 top-2 z-10 h-2.5 w-2.5 rounded-full bg-accent ring-1 ring-white/60" />
+                    )}
+                  </button>
+                );
+                return photo.hasNote ? (
+                  <NoteTooltip key={photo.id} note={photo.note!}>
+                    {btn}
+                  </NoteTooltip>
+                ) : (
+                  <div key={photo.id}>{btn}</div>
+                );
+              })}
             </div>
           </section>
         )}
@@ -228,32 +239,41 @@ export default function JourneyDetailPage() {
             </p>
           ) : (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-              {lightboxPhotos.map((photo, i) => (
-                <button
-                  key={photo.id}
-                  onClick={() => openLightbox(i)}
-                  className="group relative overflow-hidden rounded-card bg-surface"
-                >
-                  <img
-                    src={photo.url}
-                    alt={photo.fileName ?? "Photo"}
-                    className="aspect-[4/3] w-full object-cover transition group-hover:scale-[1.02]"
-                  />
-                  {photo.isCover && (
-                    <span className="absolute left-2 top-2 rounded-md bg-accent px-2 py-0.5 text-[11px] font-medium text-white">
-                      Cover
-                    </span>
-                  )}
-                  {photo.isHighlight && !photo.isCover && (
-                    <span className="absolute left-2 top-2 rounded-md bg-foreground/70 px-2 py-0.5 text-[11px] font-medium text-white">
-                      Highlight
-                    </span>
-                  )}
-                  {photo.hasNote && (
-                    <div className="absolute right-2 top-2 h-2 w-2 rounded-full bg-accent" />
-                  )}
-                </button>
-              ))}
+              {lightboxPhotos.map((photo, i) => {
+                const btn = (
+                  <button
+                    key={photo.id}
+                    onClick={() => openLightbox(i)}
+                    className="group relative overflow-hidden rounded-card bg-surface w-full text-left"
+                  >
+                    <img
+                      src={photo.url}
+                      alt={photo.fileName ?? "Photo"}
+                      className="aspect-[4/3] w-full object-cover transition group-hover:scale-[1.02]"
+                    />
+                    {photo.isCover && (
+                      <span className="absolute left-2 top-2 rounded-md bg-accent px-2 py-0.5 text-[11px] font-medium text-white">
+                        Cover
+                      </span>
+                    )}
+                    {photo.isHighlight && !photo.isCover && (
+                      <span className="absolute left-2 top-2 rounded-md bg-foreground/70 px-2 py-0.5 text-[11px] font-medium text-white">
+                        Highlight
+                      </span>
+                    )}
+                    {photo.hasNote && (
+                      <div className="absolute right-2 top-2 z-10 h-2.5 w-2.5 rounded-full bg-accent ring-1 ring-white/60" />
+                    )}
+                  </button>
+                );
+                return photo.hasNote ? (
+                  <NoteTooltip key={photo.id} note={photo.note!}>
+                    {btn}
+                  </NoteTooltip>
+                ) : (
+                  <div key={photo.id}>{btn}</div>
+                );
+              })}
             </div>
           )}
         </section>
@@ -275,6 +295,11 @@ function buildCategoryTabs(journey: Journey): { key: string; label: string }[] {
     { key: "all", label: `All (${journey.photos.length})` },
     { key: "highlights", label: `Highlights (${journey.photos.filter((p) => p.isHighlight).length})` },
   ];
+
+  const withNotesCount = journey.photos.filter((p) => p.hasNote).length;
+  if (withNotesCount > 0) {
+    tabs.push({ key: "with-notes", label: `With Notes (${withNotesCount})` });
+  }
 
   for (const cat of journey.categories) {
     const count = journey.photos.filter((p) => p.categoryId === cat.id).length;
