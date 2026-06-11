@@ -14,6 +14,7 @@ venv/
 # Build output
 dist/
 build/
+out/
 *.egg-info/
 *.tsbuildinfo
 
@@ -39,6 +40,9 @@ start-dev.sh
 # Claude Code (个人配置不提交)
 .claude/settings.local.json
 .claude/worktrees/
+
+# Test artifacts (contains local DB & photos — must not be committed)
+test-artifacts/
 
 # Logs
 *.log

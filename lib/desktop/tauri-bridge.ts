@@ -14,9 +14,20 @@ export async function create_library(basePath: string): Promise<string> {
   return invoke<string>("create_library", { basePath });
 }
 
-/** Check if a path contains a valid Footprint Library. */
-export async function check_library(path: string): Promise<boolean> {
-  return invoke<boolean>("check_library", { path });
+/** Validation result for a Library folder. */
+export interface LibraryValidationResult {
+  valid: boolean;
+  folder_exists: boolean;
+  db_exists: boolean;
+  photos_exists: boolean;
+  thumbnails_exists: boolean;
+  can_write: boolean;
+}
+
+/** Check if a path contains a valid Footprint Library. Returns detailed result. */
+export async function check_library(path: string): Promise<LibraryValidationResult> {
+  const raw = await invoke<string>("check_library", { path });
+  return JSON.parse(raw) as LibraryValidationResult;
 }
 
 /** Allow filesystem and asset access to the selected Library path. */
@@ -41,6 +52,22 @@ export async function copy_photo_to_library(
   });
 }
 
+/** Generate a thumbnail for a photo. Returns true on success. */
+export async function generate_thumbnail(
+  sourcePath: string,
+  destPath: string
+): Promise<boolean> {
+  return invoke<boolean>("generate_thumbnail", {
+    sourcePath,
+    destPath,
+  });
+}
+
+/** Open a path in the OS file explorer. */
+export async function open_in_explorer(path: string): Promise<void> {
+  return invoke<void>("open_in_explorer", { path });
+}
+
 /** Delete a photo file from the Library. */
 export async function delete_photo_from_library(
   libraryPath: string,
@@ -49,7 +76,7 @@ export async function delete_photo_from_library(
   return invoke<void>("delete_photo_from_library", { libraryPath, relativePath });
 }
 
-/** Delete an entire journey's photo directory. */
+/** Delete an entire journey's photo directory (and thumbnails). */
 export async function delete_journey_photos_dir(
   libraryPath: string,
   journeyId: string

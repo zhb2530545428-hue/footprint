@@ -1,4 +1,4 @@
-# CLAUDE.md — Footprint
+# AGENTS.md — Footprint
 
 ## 项目概述
 

@@ -4,6 +4,7 @@ import Link from "next/link";
 import type { Journey } from "@/lib/types";
 import type { FootprintSettings } from "@/lib/settings";
 import { deriveTitle, formatDateRange, formatJourneyLocation } from "@/lib/utils";
+import { getPhotoDisplayUrl } from "@/lib/data/desktopLibraryRepository";
 
 interface JourneyCardProps {
   journey: Journey;
@@ -43,7 +44,7 @@ export default function JourneyCard({ journey, settings }: JourneyCardProps) {
         <div className="relative aspect-[4/3] w-full overflow-hidden">
           {coverPhoto ? (
             <img
-              src={coverPhoto.url}
+              src={getPhotoDisplayUrl(coverPhoto)}
               alt={displayTitle}
               className="h-full w-full object-cover"
             />

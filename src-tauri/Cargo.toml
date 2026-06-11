@@ -1,6 +1,6 @@
 [package]
 name = "footprint"
-version = "2.0.0"
+version = "2.1.0"
 description = "Footprint — Personal travel photo memory app"
 authors = ["Footprint"]
 license = "MIT"
@@ -25,3 +25,4 @@ tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 tauri-plugin-fs = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-store = "2"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }

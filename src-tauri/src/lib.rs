@@ -15,19 +15,46 @@ fn create_library(base_path: String) -> Result<String, String> {
     let photos_dir = lib_path.join("photos");
     fs::create_dir_all(&photos_dir).map_err(|e| format!("Failed to create photos folder: {}", e))?;
 
+    let thumbnails_dir = lib_path.join("thumbnails");
+    fs::create_dir_all(&thumbnails_dir).map_err(|e| format!("Failed to create thumbnails folder: {}", e))?;
+
     Ok(base_path)
 }
 
 /// Check if a path contains a valid Footprint Library.
-/// Returns true if footprint.db exists (or the folder is ready for initialization).
+/// Returns a JSON string with validation details.
 #[tauri::command]
-fn check_library(path: String) -> Result<bool, String> {
+fn check_library(path: String) -> Result<String, String> {
     let lib_path = Path::new(&path);
-    if !lib_path.exists() {
-        return Ok(false);
-    }
-    let db_path = lib_path.join("footprint.db");
-    Ok(db_path.exists())
+
+    let folder_exists = lib_path.exists();
+    let db_exists = lib_path.join("footprint.db").exists();
+    let photos_exists = lib_path.join("photos").exists();
+    let thumbnails_exists = lib_path.join("thumbnails").exists();
+
+    // Test write permission by attempting to create dirs
+    let can_write = (|| {
+        if folder_exists {
+            let test_photos = lib_path.join("photos");
+            fs::create_dir_all(&test_photos).ok()?;
+            let test_thumbs = lib_path.join("thumbnails");
+            fs::create_dir_all(&test_thumbs).ok()?;
+            Some(())
+        } else {
+            None
+        }
+    })().is_some();
+
+    let result = serde_json::json!({
+        "valid": folder_exists && (db_exists || can_write) && can_write,
+        "folder_exists": folder_exists,
+        "db_exists": db_exists,
+        "photos_exists": photos_exists,
+        "thumbnails_exists": thumbnails_exists,
+        "can_write": can_write,
+    });
+
+    Ok(result.to_string())
 }
 
 /// Allow the selected Library path for filesystem and local asset access.
@@ -69,6 +96,68 @@ fn copy_photo_to_library(
     Ok(format!("photos/{}/{}.{}", journey_id, photo_id, ext))
 }
 
+/// Generate a thumbnail for a photo.
+/// Reads source_path, resizes to max 1000px long edge, saves as JPEG to dest_path.
+#[tauri::command]
+fn generate_thumbnail(source_path: String, dest_path: String) -> Result<bool, String> {
+    let img = image::open(&source_path)
+        .map_err(|e| format!("Failed to open image: {}", e))?;
+
+    let (w, h) = (img.width(), img.height());
+    let long_edge = w.max(h);
+    let max_dim: u32 = 1000;
+
+    let resized = if long_edge > max_dim {
+        let new_w = (w * max_dim) / long_edge;
+        let new_h = (h * max_dim) / long_edge;
+        img.resize(new_w, new_h, image::imageops::FilterType::Lanczos3)
+    } else {
+        img
+    };
+
+    // Ensure parent directory exists
+    if let Some(parent) = Path::new(&dest_path).parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create thumbnail directory: {}", e))?;
+    }
+
+    resized
+        .save(&dest_path)
+        .map_err(|e| format!("Failed to save thumbnail: {}", e))?;
+
+    Ok(true)
+}
+
+/// Open a path in the OS file explorer.
+#[tauri::command]
+fn open_in_explorer(path: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("Failed to open folder: {}", e))?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("Failed to open folder: {}", e))?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("Failed to open folder: {}", e))?;
+    }
+
+    Ok(())
+}
+
 /// Delete a photo file from the Library.
 #[tauri::command]
 fn delete_photo_from_library(library_path: String, relative_path: String) -> Result<(), String> {
@@ -87,6 +176,11 @@ fn delete_journey_photos_dir(library_path: String, journey_id: String) -> Result
     if dir_path.exists() {
         fs::remove_dir_all(&dir_path)
             .map_err(|e| format!("Failed to delete journey photos: {}", e))?;
+    }
+    // Also clean up thumbnail directory
+    let thumb_dir = Path::new(&library_path).join("thumbnails").join(&journey_id);
+    if thumb_dir.exists() {
+        fs::remove_dir_all(&thumb_dir).ok();
     }
     Ok(())
 }
@@ -123,6 +217,8 @@ pub fn run() {
             check_library,
             allow_library_path,
             copy_photo_to_library,
+            generate_thumbnail,
+            open_in_explorer,
             delete_photo_from_library,
             delete_journey_photos_dir,
             resolve_library_path,

@@ -1,6 +1,7 @@
 "use client";
 
 import type { JourneyPhoto } from "@/lib/types";
+import { getPhotoDisplayUrl } from "@/lib/data/desktopLibraryRepository";
 
 interface CoverPhotoPanelProps {
   coverPhoto: JourneyPhoto | undefined;
@@ -24,7 +25,7 @@ export default function CoverPhotoPanel({
         <div className="mt-5">
           <div className="overflow-hidden rounded-card max-w-md">
             <img
-              src={coverPhoto.url}
+              src={getPhotoDisplayUrl(coverPhoto)}
               alt={coverPhoto.fileName ?? "Cover photo"}
               className="w-full aspect-[4/3] object-cover"
             />

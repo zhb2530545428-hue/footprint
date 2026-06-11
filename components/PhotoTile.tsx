@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { JourneyPhoto, PhotoCategory } from "@/lib/types";
+import { getPhotoDisplayUrl } from "@/lib/data/desktopLibraryRepository";
 
 interface PhotoTileProps {
   photo: JourneyPhoto;
@@ -46,7 +47,7 @@ export default function PhotoTile({
       {/* Use padding-bottom trick for reliable aspect ratio */}
       <div className="relative w-full" style={{ paddingBottom: "75%" }}>
         <img
-          src={photo.url}
+          src={getPhotoDisplayUrl(photo)}
           alt={photo.fileName ?? "Photo"}
           className="absolute inset-0 h-full w-full object-cover"
           onError={(e) => {

@@ -4,6 +4,7 @@
  * Journeys, photos, categories, and settings are stored in SQLite
  * inside the user-selected Library folder. Photo files are copied
  * into <Library>/photos/<journeyId>/ and referenced by relative paths.
+ * Thumbnails (v2.1+) are generated into <Library>/thumbnails/<journeyId>/.
  */
 import type { Journey, JourneyPhoto, PhotoCategory } from "../types";
 import type { FootprintSettings } from "../settings";
@@ -18,9 +19,14 @@ import {
   copy_photo_to_library,
   delete_photo_from_library,
   delete_journey_photos_dir,
+  generate_thumbnail,
 } from "../desktop/tauri-bridge";
 
-type DesktopJourneyPhoto = JourneyPhoto & { _relativePath?: string };
+type DesktopJourneyPhoto = JourneyPhoto & {
+  _relativePath?: string;
+  _thumbnailRelativePath?: string;
+  _thumbnailUrl?: string;
+};
 
 // ══════════════════════════════════════════════════════════════════════
 // Helpers
@@ -71,6 +77,15 @@ function getRelativePhotoPath(journeyId: string, photo: JourneyPhoto): string {
   return `photos/${journeyId}/${photo.id}.${ext}`;
 }
 
+/**
+ * Get the best display URL for a photo.
+ * Returns thumbnail URL if available, otherwise original.
+ */
+export function getPhotoDisplayUrl(photo: JourneyPhoto): string {
+  const dp = photo as DesktopJourneyPhoto;
+  return dp._thumbnailUrl || dp.url || "";
+}
+
 /** Map a SQLite journey row to a Journey object. */
 function rowToJourney(row: any): Journey {
   return {
@@ -98,7 +113,7 @@ function rowToJourney(row: any): Journey {
 /** Map a SQLite photo row to a JourneyPhoto object. */
 function rowToPhoto(row: any, libraryPath: string): JourneyPhoto {
   const absolutePath = `${libraryPath}/${row.relative_path}`;
-  return {
+  const photo: DesktopJourneyPhoto = {
     id: row.id,
     url: convertFileSrc(absolutePath),
     fileName: row.file_name ?? row.original_file_name ?? undefined,
@@ -109,7 +124,16 @@ function rowToPhoto(row: any, libraryPath: string): JourneyPhoto {
     hasNote: toBool(row.has_note),
     createdAt: row.created_at,
     _relativePath: row.relative_path,
-  } as DesktopJourneyPhoto;
+    _thumbnailRelativePath: row.thumbnail_relative_path ?? undefined,
+  };
+
+  // If thumbnail is recorded, compute its convertFileSrc URL
+  if (row.thumbnail_relative_path) {
+    const thumbAbsolutePath = `${libraryPath}/${row.thumbnail_relative_path}`;
+    photo._thumbnailUrl = convertFileSrc(thumbAbsolutePath);
+  }
+
+  return photo;
 }
 
 /** Map a SQLite category row to a PhotoCategory object. */
@@ -228,8 +252,8 @@ export const desktopJourneyRepo: JourneyRepository = {
 
     // Save photos
     for (const photo of journey.photos) {
-      // Compute the Library-relative path: photos/<journeyId>/<photoId>.<ext>
       const relPath = getRelativePhotoPath(journey.id, photo);
+      const dp = photo as DesktopJourneyPhoto;
 
       await db.execute(
         `INSERT OR REPLACE INTO photos (
@@ -244,7 +268,7 @@ export const desktopJourneyRepo: JourneyRepository = {
           photo.fileName ?? null,
           photo.fileName ?? null,
           relPath,
-          null, // thumbnail_relative_path (v2.1+)
+          dp._thumbnailRelativePath ?? null,
           null, // mime_type
           null, // width
           null, // height
@@ -259,7 +283,6 @@ export const desktopJourneyRepo: JourneyRepository = {
         ]
       );
     }
-
   },
 
   async updateJourney(journey: Journey): Promise<void> {
@@ -332,6 +355,7 @@ export const desktopJourneyRepo: JourneyRepository = {
     // Upsert each photo (metadata only — file operations are separate)
     for (const photo of journey.photos) {
       const relPath = getRelativePhotoPath(journey.id, photo);
+      const dp = photo as DesktopJourneyPhoto;
 
       await db.execute(
         `INSERT OR REPLACE INTO photos (
@@ -346,7 +370,7 @@ export const desktopJourneyRepo: JourneyRepository = {
           photo.fileName ?? null,
           photo.fileName ?? null,
           relPath ?? "",
-          null,
+          dp._thumbnailRelativePath ?? null,
           null,
           null,
           null,
@@ -395,7 +419,7 @@ export const desktopJourneyRepo: JourneyRepository = {
     const db = requireDb();
     const libPath = requireLibraryPath();
 
-    // Delete photo files
+    // Delete photo files (also cleans thumbnails via Rust)
     await delete_journey_photos_dir(libPath, id).catch(() => {
       // Files may not exist — that's ok
     });
@@ -439,9 +463,6 @@ export const desktopPhotoRepo: PhotoRepository = {
     const results: JourneyPhoto[] = [];
 
     for (const { id, file } of files) {
-      // We need to write the file to a temp location first since the
-      // Rust command needs a file path, not a File object.
-      // Create a temp file from the File object.
       const tempPath = await writeTempFile(file);
 
       try {
@@ -453,7 +474,7 @@ export const desktopPhotoRepo: PhotoRepository = {
         );
 
         const absolutePath = `${libPath}/${relativePath}`;
-        results.push({
+        const dp: DesktopJourneyPhoto = {
           id,
           url: convertFileSrc(absolutePath),
           fileName: file.name,
@@ -463,7 +484,23 @@ export const desktopPhotoRepo: PhotoRepository = {
           hasNote: false,
           createdAt: new Date().toISOString(),
           _relativePath: relativePath,
-        } as DesktopJourneyPhoto);
+        };
+
+        // ── Generate thumbnail (v2.1+) ──
+        try {
+          const thumbRelPath = `thumbnails/${journeyId}/${id}.jpg`;
+          const thumbAbsPath = `${libPath}/${thumbRelPath}`;
+
+          await generate_thumbnail(absolutePath, thumbAbsPath);
+
+          dp._thumbnailRelativePath = thumbRelPath;
+          dp._thumbnailUrl = convertFileSrc(thumbAbsPath);
+        } catch {
+          // Thumbnail generation failed — keep original, leave thumbnail fields empty
+          // The UI will fall back to the original image
+        }
+
+        results.push(dp);
       } finally {
         // Clean up temp file
         await deleteTempFile(tempPath).catch(() => {});
@@ -479,11 +516,16 @@ export const desktopPhotoRepo: PhotoRepository = {
 
     for (const photoId of photoIds) {
       const rows: any[] = await db.select(
-        "SELECT relative_path FROM photos WHERE id = ?",
+        "SELECT relative_path, thumbnail_relative_path FROM photos WHERE id = ?",
         [photoId]
       );
-      if (rows.length > 0 && rows[0].relative_path) {
-        await delete_photo_from_library(libPath, rows[0].relative_path).catch(() => {});
+      if (rows.length > 0) {
+        if (rows[0].relative_path) {
+          await delete_photo_from_library(libPath, rows[0].relative_path).catch(() => {});
+        }
+        if (rows[0].thumbnail_relative_path) {
+          await delete_photo_from_library(libPath, rows[0].thumbnail_relative_path).catch(() => {});
+        }
       }
       await db.execute("DELETE FROM photos WHERE id = ?", [photoId]);
     }

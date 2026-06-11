@@ -104,8 +104,8 @@ export default function LibrarySetupOverlay({ onLibraryReady }: LibrarySetupOver
       }
 
       // Validate
-      const valid = await check_library(selected);
-      if (!valid) {
+      const result = await check_library(selected);
+      if (!result.valid) {
         setError(
           "This folder doesn't contain a Footprint Library. Please select a valid Library folder or create a new one."
         );

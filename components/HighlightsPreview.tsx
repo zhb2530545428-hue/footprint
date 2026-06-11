@@ -1,6 +1,7 @@
 "use client";
 
 import type { JourneyPhoto } from "@/lib/types";
+import { getPhotoDisplayUrl } from "@/lib/data/desktopLibraryRepository";
 
 interface HighlightsPreviewProps {
   highlights: JourneyPhoto[];
@@ -28,7 +29,7 @@ export default function HighlightsPreview({
               >
                 <div className="overflow-hidden rounded-card ring-2 ring-accent/30">
                   <img
-                    src={photo.url}
+                    src={getPhotoDisplayUrl(photo)}
                     alt={photo.fileName ?? "Highlight"}
                     className="w-full aspect-[4/3] object-cover"
                   />

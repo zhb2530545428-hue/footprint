@@ -1,9 +1,10 @@
 /** @type {import('next').NextConfig} */
+const isTauriBuild = process.env.TAURI_BUILD === "1";
+
 const nextConfig = {
-  // Keep production builds from overwriting a running dev server's cache.
-  distDir: process.env.NODE_ENV === "production" ? ".next-build" : ".next",
+  output: isTauriBuild ? "export" : undefined,
+  distDir: isTauriBuild ? "out" : ".next",
   images: {
-    // v1 uses local object URLs; disable remote image optimization
     unoptimized: true,
   },
 };
