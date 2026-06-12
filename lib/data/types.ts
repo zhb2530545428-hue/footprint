@@ -8,6 +8,44 @@
 import type { Journey, JourneyPhoto, PhotoCategory } from "../types";
 import type { FootprintSettings } from "../settings";
 
+// ── Import Progress ──────────────────────────────────────────────────
+
+export type PhotoImportPhase =
+  | "idle"
+  | "preparing"
+  | "saving-originals"
+  | "generating-thumbnails"
+  | "finalizing"
+  | "complete"
+  | "error";
+
+export type PhotoImportFileStatus =
+  | "queued"
+  | "saving-original"
+  | "original-saved"
+  | "generating-thumbnail"
+  | "ready"
+  | "error";
+
+export interface PhotoImportProgress {
+  phase: PhotoImportPhase;
+  total: number;
+  completedOriginals: number;
+  completedThumbnails: number;
+  failed: number;
+  currentFileName?: string;
+  percent: number;
+  /** True when all originals have been safely saved — Archive/Save can proceed. */
+  canSafelySaveJourney: boolean;
+  /** Human-readable status message. */
+  message: string;
+}
+
+export interface SavePhotosOptions {
+  onProgress?: (progress: PhotoImportProgress) => void;
+  deferThumbnails?: boolean;
+}
+
 // ── Journey Repository ──────────────────────────────────────────────
 
 export interface JourneyRepository {
@@ -17,11 +55,17 @@ export interface JourneyRepository {
   /** Get a single journey by ID */
   getJourney(id: string): Promise<Journey | undefined>;
 
-  /** Save a new journey */
-  saveJourney(journey: Journey): Promise<void>;
+  /** Save a new journey. `onProgress` fires after each photo row is written. */
+  saveJourney(
+    journey: Journey,
+    onProgress?: (current: number, total: number) => void
+  ): Promise<void>;
 
-  /** Update an existing journey */
-  updateJourney(journey: Journey): Promise<void>;
+  /** Update an existing journey. `onProgress` fires after each photo row is written. */
+  updateJourney(
+    journey: Journey,
+    onProgress?: (current: number, total: number) => void
+  ): Promise<void>;
 
   /** Move a journey to trash (soft delete) */
   moveJourneyToTrash(id: string): Promise<void>;
@@ -57,7 +101,8 @@ export interface PhotoRepository {
   /** Save uploaded photo files for a journey. Returns hydrated JourneyPhoto objects. */
   savePhotos(
     journeyId: string,
-    files: { id: string; file: File }[]
+    files: { id: string; file: File }[],
+    options?: SavePhotosOptions
   ): Promise<JourneyPhoto[]>;
 
   /** Delete photo files and return the JourneyPhoto IDs that were deleted. */

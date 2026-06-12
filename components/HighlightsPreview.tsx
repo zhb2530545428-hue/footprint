@@ -31,6 +31,8 @@ export default function HighlightsPreview({
                   <img
                     src={getPhotoDisplayUrl(photo)}
                     alt={photo.fileName ?? "Highlight"}
+                    loading="lazy"
+                    decoding="async"
                     className="w-full aspect-[4/3] object-cover"
                   />
                 </div>

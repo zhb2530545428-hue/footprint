@@ -27,6 +27,8 @@ export default function CoverPhotoPanel({
             <img
               src={getPhotoDisplayUrl(coverPhoto)}
               alt={coverPhoto.fileName ?? "Cover photo"}
+              loading="lazy"
+              decoding="async"
               className="w-full aspect-[4/3] object-cover"
             />
           </div>

@@ -97,7 +97,7 @@ fn copy_photo_to_library(
 }
 
 /// Generate a thumbnail for a photo.
-/// Reads source_path, resizes to max 1000px long edge, saves as JPEG to dest_path.
+/// Reads source_path, resizes to max 640px long edge, saves as JPEG (quality ~80) to dest_path.
 #[tauri::command]
 fn generate_thumbnail(source_path: String, dest_path: String) -> Result<bool, String> {
     let img = image::open(&source_path)
@@ -105,7 +105,7 @@ fn generate_thumbnail(source_path: String, dest_path: String) -> Result<bool, St
 
     let (w, h) = (img.width(), img.height());
     let long_edge = w.max(h);
-    let max_dim: u32 = 1000;
+    let max_dim: u32 = 640;
 
     let resized = if long_edge > max_dim {
         let new_w = (w * max_dim) / long_edge;
@@ -121,8 +121,12 @@ fn generate_thumbnail(source_path: String, dest_path: String) -> Result<bool, St
             .map_err(|e| format!("Failed to create thumbnail directory: {}", e))?;
     }
 
+    // Save as JPEG with quality 80
+    let mut output = std::fs::File::create(&dest_path)
+        .map_err(|e| format!("Failed to create thumbnail file: {}", e))?;
+    let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut output, 80);
     resized
-        .save(&dest_path)
+        .write_with_encoder(encoder)
         .map_err(|e| format!("Failed to save thumbnail: {}", e))?;
 
     Ok(true)

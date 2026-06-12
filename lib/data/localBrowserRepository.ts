@@ -14,6 +14,8 @@ import type {
   JourneyRepository,
   PhotoRepository,
   SettingsRepository,
+  SavePhotosOptions,
+  PhotoImportProgress,
 } from "./types";
 import {
   getJourneys,
@@ -54,22 +56,68 @@ export const browserJourneyRepo: JourneyRepository = {
 export const browserPhotoRepo: PhotoRepository = {
   async savePhotos(
     _journeyId: string,
-    files: { id: string; file: File }[]
+    files: { id: string; file: File }[],
+    options?: SavePhotosOptions
   ): Promise<JourneyPhoto[]> {
-    // Store blobs in IndexedDB
-    await Promise.all(files.map(({ id, file }) => savePhotoBlob(id, file)));
+    const { onProgress } = options ?? {};
+    const total = files.length;
+    let completed = 0;
+    let failed = 0;
 
-    return files.map(({ id, file }) => ({
-      id,
-      storageKey: id,
-      url: URL.createObjectURL(file),
-      fileName: file.name,
-      isCover: false,
-      isHighlight: false,
-      categoryId: "default-other",
-      hasNote: false,
-      createdAt: new Date().toISOString(),
-    }));
+    const buildProgress = (currentFile?: string): PhotoImportProgress => ({
+      phase: total === 0 ? "complete" : "saving-originals",
+      total,
+      completedOriginals: completed,
+      completedThumbnails: 0,
+      failed,
+      currentFileName: currentFile,
+      percent: total > 0 ? Math.round(((completed + failed) / total) * 100) : 100,
+      canSafelySaveJourney: completed === total,
+      message:
+        total === 0
+          ? "Import complete"
+          : `Saving originals… ${completed} / ${total}`,
+    });
+
+    onProgress?.(buildProgress());
+
+    const results: JourneyPhoto[] = [];
+
+    // Process one at a time — browser IndexedDB has no real parallelism benefit
+    for (const { id, file } of files) {
+      try {
+        await savePhotoBlob(id, file);
+        completed++;
+        results.push({
+          id,
+          storageKey: id,
+          url: URL.createObjectURL(file),
+          fileName: file.name,
+          isCover: false,
+          isHighlight: false,
+          categoryId: "default-other",
+          hasNote: false,
+          createdAt: new Date().toISOString(),
+        });
+      } catch {
+        failed++;
+      }
+
+      onProgress?.(buildProgress(file.name));
+
+      // Wait for the browser to paint before processing the next file
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+
+    const finalProgress = buildProgress();
+    finalProgress.phase = "complete";
+    finalProgress.message =
+      failed > 0
+        ? `${completed} photos added, ${failed} failed`
+        : `Import complete — ${completed} photos added`;
+    onProgress?.(finalProgress);
+
+    return results;
   },
 
   async deletePhotos(photoIds: string[], _journeyId: string): Promise<void> {

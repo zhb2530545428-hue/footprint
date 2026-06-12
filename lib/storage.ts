@@ -173,15 +173,23 @@ export async function getJourney(id: string): Promise<Journey | undefined> {
 }
 
 /** Save a new journey's metadata to localStorage. */
-export async function saveJourney(journey: Journey): Promise<void> {
+export async function saveJourney(
+  journey: Journey,
+  onProgress?: (current: number, total: number) => void
+): Promise<void> {
   if (!isBrowser()) return;
   const journeys = readStoredJourneys();
   journeys.push(journey);
   writeStoredJourneys(journeys);
+  // Browser localStorage is near-instant — report 100% immediately
+  onProgress?.(journey.photos.length, journey.photos.length);
 }
 
 /** Update an existing journey */
-export async function updateJourney(updated: Journey): Promise<void> {
+export async function updateJourney(
+  updated: Journey,
+  onProgress?: (current: number, total: number) => void
+): Promise<void> {
   if (!isBrowser()) return;
   const journeys = readStoredJourneys();
   const idx = journeys.findIndex((j) => j.id === updated.id);
@@ -197,6 +205,7 @@ export async function updateJourney(updated: Journey): Promise<void> {
   journeys[idx] = { ...updated, updatedAt: new Date().toISOString() };
   writeStoredJourneys(journeys);
   await deletePhotoBlobs(removedKeys);
+  onProgress?.(updated.photos.length, updated.photos.length);
 }
 
 /** Delete a journey by id */

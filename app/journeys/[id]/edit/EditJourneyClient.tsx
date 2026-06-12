@@ -5,12 +5,16 @@ import { useParams, useRouter } from "next/navigation";
 import type { Journey, JourneyPhoto, PhotoCategory } from "@/lib/types";
 import { createDefaultCategories } from "@/lib/storage";
 import { getJourneyRepo, getPhotoRepo } from "@/lib/data/repositoryFactory";
+import type { PhotoImportProgress } from "@/lib/data/types";
 import { generateId, deriveTitle } from "@/lib/utils";
+import { queueThumbnailGeneration } from "@/lib/desktop/thumbnailQueue";
 import TopNav from "@/components/TopNav";
 import JourneyForm from "@/components/JourneyForm";
 import type { JourneyFormData } from "@/components/JourneyForm";
 import UploadDropzone from "@/components/UploadDropzone";
 import PhotoGrid from "@/components/PhotoGrid";
+import ImportProgress from "@/components/ImportProgress";
+import ArchivingModal, { type ArchiveStep } from "@/components/ArchivingModal";
 import ConfirmModal from "@/components/ConfirmModal";
 import EditJourneyHeader from "@/components/EditJourneyHeader";
 import CoverPhotoPanel from "@/components/CoverPhotoPanel";
@@ -43,9 +47,13 @@ export default function EditJourneyPage() {
   const [categories, setCategories] = useState<PhotoCategory[]>([]);
   const [activeFilter, setActiveFilter] = useState("all");
   const [saving, setSaving] = useState(false);
+  const [saveStep, setSaveStep] = useState<ArchiveStep>("preparing");
+  const [savePercent, setSavePercent] = useState(0);
   const [storageError, setStorageError] = useState("");
+  const [importProgress, setImportProgress] = useState<PhotoImportProgress | null>(null);
   const photosRef = useRef<JourneyPhoto[]>([]);
   const pendingFilesRef = useRef<PendingFile[]>([]);
+  const savedPhotosRef = useRef<JourneyPhoto[]>([]);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -119,6 +127,87 @@ export default function EditJourneyPage() {
     };
   }, [id]);
 
+  const savingInProgressRef = useRef(false);
+
+  const drainPendingSaves = useCallback(async () => {
+    savingInProgressRef.current = true;
+
+    while (pendingFilesRef.current.length > 0) {
+      const batch = pendingFilesRef.current.splice(0);
+      const totalPending = savedPhotosRef.current.length + batch.length;
+
+      setImportProgress({
+        phase: "saving-originals",
+        total: totalPending,
+        completedOriginals: savedPhotosRef.current.length,
+        completedThumbnails: 0,
+        failed: 0,
+        percent: Math.round((savedPhotosRef.current.length / totalPending) * 100),
+        canSafelySaveJourney: false,
+        message: `Saving originals… ${savedPhotosRef.current.length} / ${totalPending}`,
+      });
+
+      try {
+        const newSaved = await getPhotoRepo().savePhotos(id, batch, {
+          onProgress: (p) => {
+            const adjusted: PhotoImportProgress = {
+              ...p,
+              total: Math.max(p.total, savedPhotosRef.current.length + batch.length),
+              completedOriginals: savedPhotosRef.current.length + p.completedOriginals,
+              canSafelySaveJourney:
+                savedPhotosRef.current.length + p.completedOriginals ===
+                savedPhotosRef.current.length + batch.length &&
+                pendingFilesRef.current.length === 0,
+            };
+            setImportProgress(adjusted);
+          },
+        });
+
+        const valid = newSaved.filter(
+          (p2) => p2.url && p2.url.length > 0
+        );
+        savedPhotosRef.current = [...savedPhotosRef.current, ...valid];
+
+        // Swap the grid from full-resolution blob previews to the saved
+        // thumbnails (or originals on disk), keeping any user-set curation.
+        const savedById = new Map(valid.map((p2) => [p2.id, p2]));
+        const staleBlobUrls: string[] = [];
+        setPhotos((prev) => {
+          const next = prev.map((p2) => {
+            const saved = savedById.get(p2.id);
+            if (!saved) return p2;
+            if (p2.url.startsWith("blob:") && p2.url !== saved.url) {
+              staleBlobUrls.push(p2.url);
+            }
+            return {
+              ...saved,
+              isCover: p2.isCover,
+              isHighlight: p2.isHighlight,
+              note: p2.note,
+              hasNote: p2.hasNote,
+              categoryId: p2.categoryId,
+            };
+          });
+          photosRef.current = next;
+          return next;
+        });
+        if (staleBlobUrls.length > 0) {
+          requestAnimationFrame(() => {
+            for (const url of staleBlobUrls) URL.revokeObjectURL(url);
+          });
+        }
+      } catch {
+        setImportProgress((prev) =>
+          prev
+            ? { ...prev, phase: "error", message: "Import encountered an error" }
+            : null
+        );
+      }
+    }
+
+    savingInProgressRef.current = false;
+  }, [id]);
+
   const handleFilesSelected = useCallback((files: File[]) => {
     setStorageError("");
     const prepared: PendingFile[] = files.map((file) => ({
@@ -146,7 +235,12 @@ export default function EditJourneyPage() {
       photosRef.current = next;
       return next;
     });
-  }, []);
+
+    // Start background save if not already running
+    if (!savingInProgressRef.current && pendingFilesRef.current.length > 0) {
+      void drainPendingSaves();
+    }
+  }, [drainPendingSaves]);
 
   const handleSetCover = useCallback((photoId: string) => {
     setPhotos((prev) =>
@@ -180,6 +274,9 @@ export default function EditJourneyPage() {
     if (removed) getPhotoRepo().revokeObjectUrls([removed]);
     pendingFilesRef.current = pendingFilesRef.current.filter(
       (pending) => pending.id !== photoId
+    );
+    savedPhotosRef.current = savedPhotosRef.current.filter(
+      (sp) => sp.id !== photoId
     );
 
     setPhotos((prev) => {
@@ -307,11 +404,13 @@ export default function EditJourneyPage() {
     !saving &&
     (formData.locationProvince.length > 0
       ? formData.locationCities.length > 0
-      : formData.location.trim().length > 0);
+      : formData.location.trim().length > 0) &&
+    (importProgress?.canSafelySaveJourney ?? true);
 
   const handleSave = useCallback(async () => {
     if (!canSave || !journey) return;
     setSaving(true);
+    setSaveStep("preparing");
     setStorageError("");
 
     // Ensure exactly one cover photo
@@ -336,10 +435,10 @@ export default function EditJourneyPage() {
     const title = formData.title.trim() || undefined;
 
     try {
-      const pendingFiles = pendingFilesRef.current;
-      if (pendingFiles.length > 0) {
-        const savedPhotos = await getPhotoRepo().savePhotos(journey.id, pendingFiles);
-        const savedMap = new Map(savedPhotos.map((photo) => [photo.id, photo]));
+      // Merge newly saved photos with user metadata
+      const newlySavedPhotos = savedPhotosRef.current;
+      if (newlySavedPhotos.length > 0) {
+        const savedMap = new Map(newlySavedPhotos.map((photo) => [photo.id, photo]));
         finalPhotos = finalPhotos.map((photo) => {
           const saved = savedMap.get(photo.id);
           return saved
@@ -381,8 +480,28 @@ export default function EditJourneyPage() {
         categories,
       };
 
-      await getJourneyRepo().updateJourney(updated);
+      // Step 1 → 2: Saving to Library
+      setSaveStep("saving");
+      setSavePercent(0);
+      await new Promise<void>((r) => requestAnimationFrame(() => r()));
+
+      await getJourneyRepo().updateJourney(updated, (current, total) => {
+        setSavePercent(Math.round((current / Math.max(total, 1)) * 100));
+      });
+
+      // Step 2 → 3: Finishing up
+      setSaveStep("finishing");
+      setSavePercent(100);
+
+      // Start background thumbnail generation for new photos only (non-blocking)
+      if (newlySavedPhotos.length > 0) {
+        queueThumbnailGeneration(journey.id, newlySavedPhotos);
+      }
+
+      await new Promise((r) => setTimeout(r, 400));
+
       pendingFilesRef.current = [];
+      savedPhotosRef.current = [];
       router.push(`/journeys/${journey.id}`);
     } catch {
       setSaving(false);
@@ -454,6 +573,18 @@ export default function EditJourneyPage() {
     <div className="min-h-screen">
       <TopNav />
 
+      {/* Saving modal */}
+      <ArchivingModal
+        open={saving}
+        step={saveStep}
+        percent={savePercent}
+        detail={
+          saveStep === "saving" && photos.length > 0
+            ? `${photos.length} photo${photos.length > 1 ? "s" : ""}`
+            : undefined
+        }
+      />
+
       <main className="mx-auto max-w-3xl px-page-mobile py-10 lg:px-page-desktop lg:py-14">
         {/* ═══════════════════════════════════════════
             Header
@@ -512,6 +643,8 @@ export default function EditJourneyPage() {
                 {storageError}
               </p>
             )}
+            {/* Import progress */}
+            <ImportProgress progress={importProgress} />
           </div>
 
           {/* Filter tabs + Photo grid */}
@@ -703,7 +836,17 @@ export default function EditJourneyPage() {
                 disabled={!canSave}
                 className="w-full rounded-button bg-accent px-8 py-3 text-[15px] font-semibold text-white transition hover:bg-accent/85 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
               >
-                {saving ? "Saving…" : "Save Changes"}
+                {(() => {
+                  if (saving) return "Saving…";
+                  if (
+                    importProgress &&
+                    !importProgress.canSafelySaveJourney &&
+                    importProgress.total > 0
+                  ) {
+                    return importProgress.message ?? "Saving photos…";
+                  }
+                  return "Save Changes";
+                })()}
               </button>
             </div>
           </div>

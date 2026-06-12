@@ -17,10 +17,12 @@ import { getDb, getLibraryPath as getDbLibraryPath } from "../desktop/sqlite";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import {
   copy_photo_to_library,
+  generate_thumbnail,
   delete_photo_from_library,
   delete_journey_photos_dir,
-  generate_thumbnail,
 } from "../desktop/tauri-bridge";
+import { mapWithConcurrency } from "../utils/asyncQueue";
+import type { SavePhotosOptions, PhotoImportProgress } from "./types";
 
 type DesktopJourneyPhoto = JourneyPhoto & {
   _relativePath?: string;
@@ -205,7 +207,10 @@ export const desktopJourneyRepo: JourneyRepository = {
     return journey;
   },
 
-  async saveJourney(journey: Journey): Promise<void> {
+  async saveJourney(
+    journey: Journey,
+    onProgress?: (current: number, total: number) => void
+  ): Promise<void> {
     const db = requireDb();
     const now = new Date().toISOString();
 
@@ -250,7 +255,9 @@ export const desktopJourneyRepo: JourneyRepository = {
       );
     }
 
-    // Save photos
+    // Save photos — report progress after each row
+    const photoCount = journey.photos.length;
+    let saved = 0;
     for (const photo of journey.photos) {
       const relPath = getRelativePhotoPath(journey.id, photo);
       const dp = photo as DesktopJourneyPhoto;
@@ -282,10 +289,19 @@ export const desktopJourneyRepo: JourneyRepository = {
           null,
         ]
       );
+
+      saved++;
+      onProgress?.(saved, photoCount);
+
+      // Wait for the browser to paint before inserting the next photo
+      await new Promise<void>((r) => requestAnimationFrame(() => r()));
     }
   },
 
-  async updateJourney(journey: Journey): Promise<void> {
+  async updateJourney(
+    journey: Journey,
+    onProgress?: (current: number, total: number) => void
+  ): Promise<void> {
     const db = requireDb();
     const libPath = requireLibraryPath();
     const now = new Date().toISOString();
@@ -352,7 +368,9 @@ export const desktopJourneyRepo: JourneyRepository = {
       }
     }
 
-    // Upsert each photo (metadata only — file operations are separate)
+    // Upsert each photo — report progress after each row
+    const photoCount = journey.photos.length;
+    let saved = 0;
     for (const photo of journey.photos) {
       const relPath = getRelativePhotoPath(journey.id, photo);
       const dp = photo as DesktopJourneyPhoto;
@@ -384,6 +402,12 @@ export const desktopJourneyRepo: JourneyRepository = {
           null,
         ]
       );
+
+      saved++;
+      onProgress?.(saved, photoCount);
+
+      // Wait for the browser to paint before inserting the next photo
+      await new Promise<void>((r) => requestAnimationFrame(() => r()));
     }
 
     // Remove categories only after photos have been reassigned.
@@ -457,57 +481,131 @@ export const desktopJourneyRepo: JourneyRepository = {
 export const desktopPhotoRepo: PhotoRepository = {
   async savePhotos(
     journeyId: string,
-    files: { id: string; file: File }[]
+    files: { id: string; file: File }[],
+    options?: SavePhotosOptions
   ): Promise<JourneyPhoto[]> {
     const libPath = requireLibraryPath();
-    const results: JourneyPhoto[] = [];
+    const { onProgress } = options ?? {};
 
-    for (const { id, file } of files) {
-      const tempPath = await writeTempFile(file);
+    let completed = 0;
+    let failed = 0;
+    const total = files.length;
 
-      try {
-        const relativePath = await copy_photo_to_library(
-          tempPath,
-          libPath,
-          journeyId,
-          id
-        );
+    // Build initial progress
+    const buildProgress = (currentFile?: string): PhotoImportProgress => {
+      const percent = total > 0 ? Math.round(((completed + failed) / total) * 100) : 100;
+      return {
+        phase: total === 0 ? "complete" : "saving-originals",
+        total,
+        completedOriginals: completed,
+        completedThumbnails: 0,
+        failed,
+        currentFileName: currentFile,
+        percent,
+        canSafelySaveJourney: completed === total,
+        message:
+          total === 0
+            ? "Import complete"
+            : `Saving originals… ${completed} / ${total}`,
+      };
+    };
 
-        const absolutePath = `${libPath}/${relativePath}`;
-        const dp: DesktopJourneyPhoto = {
-          id,
-          url: convertFileSrc(absolutePath),
-          fileName: file.name,
-          isCover: false,
-          isHighlight: false,
-          categoryId: "default-other",
-          hasNote: false,
-          createdAt: new Date().toISOString(),
-          _relativePath: relativePath,
-        };
+    // Emit initial progress
+    onProgress?.(buildProgress());
 
-        // ── Generate thumbnail (v2.1+) ──
+    // Yield to the UI so React can render the progress panel
+    const yieldToUI = () =>
+      new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+    // Copy originals with bounded concurrency (2 at a time). Thumbnails are
+    // generated right after each copy (in Rust, off the JS main thread) so the
+    // grid can swap from full-resolution blob previews to small thumbnails as
+    // soon as they are ready — this is what keeps the UI responsive.
+    const savedPhotos = await mapWithConcurrency(
+      files,
+      2,
+      async ({ id, file }): Promise<DesktopJourneyPhoto> => {
+        const tempPath = await writeTempFile(file);
+
         try {
+          const relativePath = await copy_photo_to_library(
+            tempPath,
+            libPath,
+            journeyId,
+            id
+          );
+
+          const absolutePath = `${libPath}/${relativePath}`;
+
+          // Generate the thumbnail immediately. Failures (e.g. HEIC, which the
+          // Rust image crate can't decode) are non-fatal — fall back to the
+          // original. The background thumbnail queue remains as a safety net.
+          let thumbnailRelativePath: string | undefined;
+          let thumbnailUrl: string | undefined;
           const thumbRelPath = `thumbnails/${journeyId}/${id}.jpg`;
-          const thumbAbsPath = `${libPath}/${thumbRelPath}`;
+          try {
+            await generate_thumbnail(absolutePath, `${libPath}/${thumbRelPath}`);
+            thumbnailRelativePath = thumbRelPath;
+            thumbnailUrl = convertFileSrc(`${libPath}/${thumbRelPath}`);
+          } catch {
+            // Leave thumbnail fields unset; grid falls back to the original.
+          }
 
-          await generate_thumbnail(absolutePath, thumbAbsPath);
+          completed++;
 
-          dp._thumbnailRelativePath = thumbRelPath;
-          dp._thumbnailUrl = convertFileSrc(thumbAbsPath);
+          // Yield and report progress after each file
+          onProgress?.(buildProgress(file.name));
+          await yieldToUI();
+
+          return {
+            id,
+            url: convertFileSrc(absolutePath),
+            fileName: file.name,
+            isCover: false,
+            isHighlight: false,
+            categoryId: "default-other",
+            hasNote: false,
+            createdAt: new Date().toISOString(),
+            _relativePath: relativePath,
+            _thumbnailRelativePath: thumbnailRelativePath,
+            _thumbnailUrl: thumbnailUrl,
+          };
         } catch {
-          // Thumbnail generation failed — keep original, leave thumbnail fields empty
-          // The UI will fall back to the original image
+          failed++;
+
+          // Yield and report progress even on failure
+          onProgress?.(buildProgress(file.name));
+          await yieldToUI();
+
+          // Return a placeholder — caller can filter by checking url
+          return {
+            id,
+            url: "",
+            fileName: file.name,
+            isCover: false,
+            isHighlight: false,
+            categoryId: "default-other",
+            hasNote: false,
+            createdAt: new Date().toISOString(),
+            _relativePath: undefined,
+          };
+        } finally {
+          // Clean up temp file
+          await deleteTempFile(tempPath).catch(() => {});
         }
-
-        results.push(dp);
-      } finally {
-        // Clean up temp file
-        await deleteTempFile(tempPath).catch(() => {});
       }
-    }
+    );
 
-    return results;
+    // Emit final progress
+    const finalProgress = buildProgress();
+    finalProgress.phase = failed > 0 ? "complete" : savedPhotos.every((p) => (p as DesktopJourneyPhoto)._relativePath) ? "complete" : "complete";
+    finalProgress.message =
+      failed > 0
+        ? `${completed} photos added, ${failed} failed`
+        : `Import complete — ${completed} photos added`;
+    onProgress?.(finalProgress);
+
+    return savedPhotos;
   },
 
   async deletePhotos(photoIds: string[], _journeyId: string): Promise<void> {

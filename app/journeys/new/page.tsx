@@ -5,12 +5,16 @@ import { useRouter } from "next/navigation";
 import type { Journey, JourneyPhoto } from "@/lib/types";
 import { createDefaultCategories } from "@/lib/storage";
 import { getJourneyRepo, getPhotoRepo } from "@/lib/data/repositoryFactory";
+import type { PhotoImportProgress } from "@/lib/data/types";
 import { generateId, deriveTitle } from "@/lib/utils";
+import { queueThumbnailGeneration } from "@/lib/desktop/thumbnailQueue";
 import TopNav from "@/components/TopNav";
 import JourneyForm from "@/components/JourneyForm";
 import type { JourneyFormData } from "@/components/JourneyForm";
 import UploadDropzone from "@/components/UploadDropzone";
 import PhotoGrid from "@/components/PhotoGrid";
+import ImportProgress from "@/components/ImportProgress";
+import ArchivingModal, { type ArchiveStep } from "@/components/ArchivingModal";
 
 interface PendingFile {
   id: string;
@@ -32,27 +36,120 @@ export default function NewJourneyPage() {
   });
   const [photos, setPhotos] = useState<JourneyPhoto[]>([]);
   const [archiving, setArchiving] = useState(false);
+  const [archiveStep, setArchiveStep] = useState<ArchiveStep>("preparing");
+  const [archivePercent, setArchivePercent] = useState(0);
   const [storageError, setStorageError] = useState("");
+  const [importProgress, setImportProgress] = useState<PhotoImportProgress | null>(null);
   const pendingFilesRef = useRef<PendingFile[]>([]);
   const photosRef = useRef<JourneyPhoto[]>([]);
   const archivedRef = useRef(false);
+  const journeyIdRef = useRef<string>(generateId());
+  const savedPhotosRef = useRef<JourneyPhoto[]>([]);
 
   useEffect(() => {
     photosRef.current = photos;
   }, [photos]);
 
   useEffect(() => {
+    const journeyId = journeyIdRef.current;
+    const savedRef = savedPhotosRef;
+    const archived = archivedRef;
     return () => {
-      // Clean up temporary blob URLs and browser IndexedDB blobs on unmount
+      // Clean up temporary blob URLs and files on unmount
       const currentPhotos = photosRef.current;
       getPhotoRepo().revokeObjectUrls(currentPhotos);
-      if (!archivedRef.current) {
-        void getPhotoRepo().deletePhotos(
-          currentPhotos.map((p) => p.id),
-          ""
-        ).catch(() => {});
+      if (!archived.current) {
+        const savedIds = savedRef.current.map((p) => p.id);
+        if (savedIds.length > 0) {
+          void getPhotoRepo().deletePhotos(savedIds, journeyId).catch(() => {});
+        }
+        void getPhotoRepo().deleteAllPhotosForJourney(journeyId).catch(() => {});
       }
     };
+  }, []);
+
+  const savingInProgressRef = useRef(false);
+
+  // Drain all pending files through savePhotos, processing new arrivals too
+  const drainPendingSaves = useCallback(async () => {
+    savingInProgressRef.current = true;
+    const journeyId = journeyIdRef.current;
+
+    while (pendingFilesRef.current.length > 0) {
+      const batch = pendingFilesRef.current.splice(0);
+      const totalPending = savedPhotosRef.current.length + batch.length;
+
+      setImportProgress({
+        phase: "saving-originals",
+        total: totalPending,
+        completedOriginals: savedPhotosRef.current.length,
+        completedThumbnails: 0,
+        failed: 0,
+        percent: Math.round((savedPhotosRef.current.length / totalPending) * 100),
+        canSafelySaveJourney: false,
+        message: `Saving originals… ${savedPhotosRef.current.length} / ${totalPending}`,
+      });
+
+      try {
+        const newSaved = await getPhotoRepo().savePhotos(journeyId, batch, {
+          onProgress: (p) => {
+            // Adjust total to reflect cumulative count
+            const adjusted: PhotoImportProgress = {
+              ...p,
+              total: Math.max(p.total, savedPhotosRef.current.length + batch.length),
+              completedOriginals: savedPhotosRef.current.length + p.completedOriginals,
+              canSafelySaveJourney:
+                savedPhotosRef.current.length + p.completedOriginals ===
+                savedPhotosRef.current.length + batch.length &&
+                pendingFilesRef.current.length === 0,
+            };
+            setImportProgress(adjusted);
+          },
+        });
+
+        const valid = newSaved.filter(
+          (p) => p.url && p.url.length > 0
+        );
+        savedPhotosRef.current = [...savedPhotosRef.current, ...valid];
+
+        // Swap the grid from full-resolution blob previews to the saved
+        // thumbnails (or originals on disk), keeping any user-set curation.
+        const savedById = new Map(valid.map((p) => [p.id, p]));
+        const staleBlobUrls: string[] = [];
+        setPhotos((prev) => {
+          const next = prev.map((p) => {
+            const saved = savedById.get(p.id);
+            if (!saved) return p;
+            if (p.url.startsWith("blob:") && p.url !== saved.url) {
+              staleBlobUrls.push(p.url);
+            }
+            return {
+              ...saved,
+              isCover: p.isCover,
+              isHighlight: p.isHighlight,
+              note: p.note,
+              hasNote: p.hasNote,
+              categoryId: p.categoryId,
+            };
+          });
+          photosRef.current = next;
+          return next;
+        });
+        if (staleBlobUrls.length > 0) {
+          requestAnimationFrame(() => {
+            for (const url of staleBlobUrls) URL.revokeObjectURL(url);
+          });
+        }
+      } catch {
+        setImportProgress((prev) =>
+          prev
+            ? { ...prev, phase: "error", message: "Import encountered an error" }
+            : null
+        );
+      }
+    }
+
+    savingInProgressRef.current = false;
   }, []);
 
   const handleFilesSelected = useCallback((files: File[]) => {
@@ -85,7 +182,12 @@ export default function NewJourneyPage() {
       photosRef.current = next;
       return next;
     });
-  }, []);
+
+    // Start background save if not already running
+    if (!savingInProgressRef.current && pendingFilesRef.current.length > 0) {
+      void drainPendingSaves();
+    }
+  }, [drainPendingSaves]);
 
   const handleSetCover = useCallback((id: string) => {
     setPhotos((prev) =>
@@ -116,8 +218,9 @@ export default function NewJourneyPage() {
     // Revoke blob URL for removed photo
     const removed = photosRef.current.find((photo) => photo.id === id);
     if (removed) getPhotoRepo().revokeObjectUrls([removed]);
-    // Remove from pending files
+    // Remove from pending files and saved photos
     pendingFilesRef.current = pendingFilesRef.current.filter((pf) => pf.id !== id);
+    savedPhotosRef.current = savedPhotosRef.current.filter((sp) => sp.id !== id);
     setPhotos((prev) => {
       const next = prev.filter((p) => p.id !== id);
       photosRef.current = next;
@@ -128,12 +231,16 @@ export default function NewJourneyPage() {
   const canArchive =
     formData.locationProvince.length > 0 &&
     formData.locationCities.length > 0 &&
-    !archiving;
+    !archiving &&
+    (importProgress?.canSafelySaveJourney ?? photos.length === 0);
 
   const handleArchive = useCallback(async () => {
     if (!canArchive) return;
     setArchiving(true);
+    setArchiveStep("preparing");
     setStorageError("");
+
+    const journeyId = journeyIdRef.current;
 
     // Ensure exactly one cover photo
     let finalPhotos = [...photos];
@@ -149,26 +256,20 @@ export default function NewJourneyPage() {
     }
 
     const now = new Date().toISOString();
-    const journeyId = generateId();
     const companions = formData.companions
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
 
     const title = formData.title.trim() || undefined;
-    let savedPhotos: JourneyPhoto[] = [];
 
     try {
-      // Step 1: Save photo files via repo (IndexedDB in browser, Library folder in desktop)
-      const pendingFiles = pendingFilesRef.current;
-
-      if (pendingFiles.length > 0) {
-        const photoRepo = getPhotoRepo();
-        savedPhotos = await photoRepo.savePhotos(journeyId, pendingFiles);
-
-        // Merge user-set metadata (cover, highlight, note, category) from preview photos
-        const previewMap = new Map(finalPhotos.map((p) => [p.id, p]));
-        savedPhotos = savedPhotos.map((sp) => {
+      // Merge user-set metadata (cover, highlight, note, category) into saved photos
+      const savedPhotos = savedPhotosRef.current;
+      const previewMap = new Map(finalPhotos.map((p) => [p.id, p]));
+      const mergedPhotos: JourneyPhoto[] = savedPhotos
+        .filter((sp) => previewMap.has(sp.id)) // only keep photos still in the UI
+        .map((sp) => {
           const preview = previewMap.get(sp.id);
           if (!preview) return sp;
           return {
@@ -180,9 +281,8 @@ export default function NewJourneyPage() {
             categoryId: preview.categoryId,
           };
         });
-      }
 
-      const coverPhotoId = savedPhotos.find((p) => p.isCover)?.id;
+      const coverPhotoId = mergedPhotos.find((p) => p.isCover)?.id;
 
       const journey: Journey = {
         id: journeyId,
@@ -199,25 +299,39 @@ export default function NewJourneyPage() {
         notes: formData.notes.trim() || undefined,
         status: "archived",
         coverPhotoId,
-        photos: savedPhotos,
+        photos: mergedPhotos,
         categories: createDefaultCategories(now),
         createdAt: now,
         updatedAt: now,
       };
 
-      // Step 2: Save journey via repo (localStorage in browser, SQLite in desktop)
-      await getJourneyRepo().saveJourney(journey);
+      // Step 1 → 2: Saving to Library
+      setArchiveStep("saving");
+      setArchivePercent(0);
+
+      // Wait for browser paint so the modal step updates before heavy DB write
+      await new Promise<void>((r) => requestAnimationFrame(() => r()));
+
+      // Save journey via repo (localStorage in browser, SQLite in desktop)
+      // onProgress fires after each photo row is written to DB
+      await getJourneyRepo().saveJourney(journey, (current, total) => {
+        setArchivePercent(Math.round((current / Math.max(total, 1)) * 100));
+      });
+
+      // Step 2 → 3: Finishing up
+      setArchiveStep("finishing");
+      setArchivePercent(100);
+
+      // Start background thumbnail generation (desktop only, non-blocking)
+      queueThumbnailGeneration(journeyId, mergedPhotos);
+
+      // Brief pause so the user sees "Finishing up" before the page transitions
+      await new Promise((r) => setTimeout(r, 400));
+
       getPhotoRepo().revokeObjectUrls(finalPhotos);
       archivedRef.current = true;
       router.push(`/journeys/${journey.id}`);
     } catch (err) {
-      if (savedPhotos.length > 0) {
-        const photoRepo = getPhotoRepo();
-        await photoRepo
-          .deletePhotos(savedPhotos.map((photo) => photo.id), journeyId)
-          .catch(() => {});
-        await photoRepo.deleteAllPhotosForJourney(journeyId).catch(() => {});
-      }
       setArchiving(false);
       setStorageError(`Archive failed: ${err}`);
     }
@@ -232,6 +346,18 @@ export default function NewJourneyPage() {
   return (
     <div className="min-h-screen">
       <TopNav />
+
+      {/* Archiving modal */}
+      <ArchivingModal
+        open={archiving}
+        step={archiveStep}
+        percent={archivePercent}
+        detail={
+          archiveStep === "saving" && photos.length > 0
+            ? `${photos.length} photo${photos.length > 1 ? "s" : ""}`
+            : undefined
+        }
+      />
       <main className="mx-auto max-w-5xl px-page-mobile py-10 lg:px-page-desktop lg:py-14">
         <h1 className="mb-10 text-[28px] font-semibold tracking-tight text-foreground lg:text-[34px]">
           New Journey
@@ -258,6 +384,9 @@ export default function NewJourneyPage() {
               </p>
             )}
 
+            {/* Import progress */}
+            <ImportProgress progress={importProgress} />
+
             {/* Photo grid */}
             <div className="mt-6">
               <PhotoGrid
@@ -283,9 +412,11 @@ export default function NewJourneyPage() {
                   ? `${photos.length} photo${photos.length > 1 ? "s" : ""}`
                   : "No photos yet"}
                 {" · "}
-                {formData.location
-                  ? formData.location
-                  : "Select a province and at least one city to archive"}
+                {!importProgress?.canSafelySaveJourney && photos.length > 0
+                  ? importProgress?.message ?? "Saving photos…"
+                  : formData.location
+                    ? formData.location
+                    : "Select a province and at least one city to archive"}
               </p>
             </div>
             <button
@@ -293,7 +424,13 @@ export default function NewJourneyPage() {
               disabled={!canArchive}
               className="w-full rounded-button bg-accent px-8 py-3 text-[15px] font-semibold text-white transition hover:bg-accent/85 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
             >
-              {archiving ? "Archiving…" : "Archive Journey"}
+              {(() => {
+                if (archiving) return "Archiving…";
+                if (!importProgress?.canSafelySaveJourney && photos.length > 0) {
+                  return importProgress?.message ?? "Saving photos…";
+                }
+                return "Archive Journey";
+              })()}
             </button>
           </div>
         </div>

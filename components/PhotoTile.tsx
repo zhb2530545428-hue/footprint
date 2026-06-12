@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { memo, useState } from "react";
 import type { JourneyPhoto, PhotoCategory } from "@/lib/types";
 import { getPhotoDisplayUrl } from "@/lib/data/desktopLibraryRepository";
 
@@ -14,7 +14,7 @@ interface PhotoTileProps {
   onSetCategory?: (photoId: string, categoryId: string) => void;
 }
 
-export default function PhotoTile({
+function PhotoTile({
   photo,
   categories,
   onSetCover,
@@ -49,6 +49,8 @@ export default function PhotoTile({
         <img
           src={getPhotoDisplayUrl(photo)}
           alt={photo.fileName ?? "Photo"}
+          loading="lazy"
+          decoding="async"
           className="absolute inset-0 h-full w-full object-cover"
           onError={(e) => {
             (e.target as HTMLImageElement).style.display = "none";
@@ -212,3 +214,5 @@ export default function PhotoTile({
     </div>
   );
 }
+
+export default memo(PhotoTile);

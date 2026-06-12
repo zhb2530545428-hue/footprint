@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import type { JourneyPhoto, PhotoCategory } from "@/lib/types";
 import PhotoTile from "./PhotoTile";
 
@@ -13,7 +14,7 @@ interface PhotoGridProps {
   onSetCategory?: (photoId: string, categoryId: string) => void;
 }
 
-export default function PhotoGrid({
+function PhotoGrid({
   photos,
   categories,
   onSetCover,
@@ -41,3 +42,5 @@ export default function PhotoGrid({
     </div>
   );
 }
+
+export default memo(PhotoGrid);
